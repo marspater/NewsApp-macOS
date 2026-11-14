@@ -25,7 +25,11 @@ import NaturalLanguage
 /// condition as fact, changes a figure or a name, moves a statement to another speaker, upgrades an action or drops the
 /// speaker of a contested figure fails.
 enum GeneratedTextFidelity {
+    /// A fidelity rule a generated sentence broke.
     enum Violation: String, Sendable, Equatable {
+        /// `figure` and `name`: a number or name the source lacks; `negation`: a flipped negation; `qualifier`: a
+        /// dropped allegation or condition; `speaker`: a statement moved to another speaker; `action`: an upgraded
+        /// action; `attribution`: a dropped speaker of a contested figure or attributed statement.
         case figure, name, negation, qualifier, speaker, action, attribution
     }
 
@@ -43,6 +47,7 @@ enum GeneratedTextFidelity {
         return found
     }
 
+    /// The text's sentences as NaturalLanguage segments them, trimmed, without empty ones.
     static func sentences(_ text: String) -> [String] {
         let tokenizer = NLTokenizer(unit: .sentence)
         tokenizer.string = text
@@ -51,6 +56,7 @@ enum GeneratedTextFidelity {
             .filter { !$0.isEmpty }
     }
 
+    /// The rules one generated sentence breaks against `source`, in rule order.
     static func fidelityViolations(
         _ sentence: String, source: String, sourceSentences: [String], knownNames: Set<String>
     ) -> [Violation] {

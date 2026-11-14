@@ -21,7 +21,9 @@ import NaturalLanguage
 
 /// Result of validating a fact against source passages before overview composition.
 public struct FactOverviewValidationResult: Sendable, Equatable {
+    /// Whether the fact's quote appears verbatim in its passage.
     public let isValid: Bool
+    /// Why the fact failed; nil when valid.
     public let failureReason: String?
 
     public init(isValid: Bool, failureReason: String? = nil) {
@@ -115,6 +117,7 @@ public struct OverviewComposer: Sendable {
         return expression
     }()
 
+    /// Whether the sentence is a feed footer about the article itself appearing on a site.
     static func isSelfAttribution(_ sentence: String) -> Bool {
         selfAttribution.firstMatch(in: sentence, range: NSRange(sentence.startIndex..., in: sentence)) != nil
     }
@@ -188,6 +191,8 @@ public struct OverviewComposer: Sendable {
         return expression
     }()
 
+    /// Whether the statement is the title repeated as a heading: the title alone without a closing full stop, or the
+    /// title followed only by a dateline. Case, accents and spacing are ignored.
     static func isTitleBlock(_ statement: String, title: String) -> Bool {
         func folded(_ text: String) -> String {
             text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
@@ -257,6 +262,8 @@ public struct OverviewComposer: Sendable {
         return OverviewComposer.ensureTerminalPeriod(statement)
     }
 
+    /// The trimmed text ending in sentence punctuation: trailing commas, semicolons and colons are dropped and a full
+    /// stop added when needed, inside a closing quote that follows a comma-like mark. Empty text is returned unchanged.
     static func ensureTerminalPeriod(_ text: String) -> String {
         var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return text }
@@ -279,6 +286,8 @@ public struct OverviewComposer: Sendable {
         return trimmed + "."
     }
 
+    /// Checks that the fact's passage is among `passages` and that its non-empty quote appears in the passage text,
+    /// ignoring case and accents.
     public static func validateFactForOverview(
         _ fact: PassageAnchoredFact,
         against passages: [EvidencePassage]
@@ -333,6 +342,8 @@ public struct OverviewComposer: Sendable {
     ///   - articles: Original source publisher articles (retained untouched).
     ///   - leadImage: Optional lead image for the overview.
     ///   - membershipVersion: Membership version of the event cluster.
+    ///   - cappedDescriptionArticleIDs: Articles whose feed cut the description at a fixed length; a cut-off last
+    ///     sentence of theirs never takes a Highlights slot, and the set is part of the input hash.
     /// - Returns: Derived `EventOverviewDocument`.
     static func composeOverview(
         eventID: String,
@@ -870,6 +881,7 @@ public struct OverviewComposer: Sendable {
 /// Why a model draft was kept or replaced by the deterministic overview, with per-line rejection counts (#308).
 /// Production keeps only the document; evaluation reports aggregate these without any text.
 struct OverviewModelOutcome: Sendable, Equatable, Codable {
+    /// The outcome of one draft request.
     enum Result: String, Sendable, Codable {
         /// The draft passed every check and replaced the deterministic overview.
         case accepted
@@ -886,13 +898,20 @@ struct OverviewModelOutcome: Sendable, Equatable, Codable {
         case weakDraft
     }
 
+    /// Why the draft was kept or replaced.
     var result: Result
+    /// Lines in the model's answer.
     var lines = 0
+    /// Lines that did not parse into an introduction or a cited fact.
     var malformedLines = 0
+    /// Parsed lines a deterministic check rejected.
     var deterministicRejections = 0
+    /// Parsed lines the model's own verification rejected.
     var modelRejections = 0
     /// Deterministic rejections by first failed check, such as `notOneSentence` or `verifier_numericMismatch`.
     var rejectionReasons: [String: Int] = [:]
+    /// Introduction lines that survived.
     var keptIntroduction = 0
+    /// Fact lines that survived.
     var keptFacts = 0
 }

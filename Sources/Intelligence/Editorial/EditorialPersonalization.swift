@@ -19,38 +19,57 @@ import Darwin
 import Foundation
 import SQLite3
 
+/// Profile decay and reward weights for `EditorialPersonalization`.
 struct PersonalizationPolicy: Sendable {
+    /// Seconds after which an earlier profile counts half against a new reward; must be positive.
     let halfLife: TimeInterval
+    /// Reward for a click; must be positive.
     let clickWeight: Double
+    /// Reward for a save; must be positive.
     let saveWeight: Double
+    /// Reward for scrolling past without engagement; must be negative.
     let skipWeight: Double
 }
+/// One visible episode of an article, which later skips, clicks and saves refer to by `impressionID`.
 struct EditorialRenderedImpression: Sendable {
     let impressionID: String
     let articleID: String
     let topicID: String
+    /// The article's 384-dimension embedding; nil records actions without moving the profile.
     let vector: [Float]?
+    /// The embedding model; must match the store's.
     let modelVersion: String
+    /// When the article was shown; within the last 30 days and not in the future.
     let at: Date
 }
+/// Stored impressions and the actions recorded against them, after expiry.
 struct PersonalizationCounts: Sendable {
     let impressions: Int
     let skips: Int
     let clicks: Int
     let saves: Int
 }
+/// An article that `EditorialPersonalization.discoveryAllocation` may place in a discovery slot.
 struct DiscoveryCandidate: Sendable {
     let articleID: String
     let topicID: String
+    /// Whether the article's topic is adjacent to the reader's; only adjacent articles are eligible.
     let isAdjacent: Bool
+    /// How often the article was shown before; fewer comes first.
     let priorImpressions: Int
 }
+/// The discovery slots of one batch and the articles that fill them.
 struct DiscoveryAllocation: Sendable {
+    /// Slots the batch owes: three in twenty, carrying the fraction forward in `remainder`.
     let requested: Int
     let articleIDs: [String]
+    /// Requested slots no eligible article filled.
     let shortage: Int
+    /// The fraction carried to the next batch, in twentieths.
     let remainder: Int
 }
+/// Why the personalization store refused a call: a bad policy, input or time, a file that is not the store it expects,
+/// or a SQLite failure.
 enum PersonalizationError: Error {
     case invalidPolicy, invalidInput, invalidTime, foreignDatabase, sqlite
 }
@@ -76,6 +95,12 @@ actor EditorialPersonalization {
     private let now: @Sendable () -> Date
     private var enabled = false
 
+    /// Opens the store at `path`, or in memory when nil, and expires impressions older than 30 days.
+    ///
+    /// A new file is created exclusively with owner-only permissions. An existing file that is not a regular file
+    /// holding a recognized store throws `PersonalizationError.foreignDatabase`; a store made for another
+    /// `modelVersion` throws `PersonalizationError.invalidInput`. Throws `PersonalizationError.invalidPolicy` for a
+    /// policy outside its ranges or an empty model version.
     init(
         policy: PersonalizationPolicy, modelVersion: String, path: String? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
@@ -223,8 +248,11 @@ actor EditorialPersonalization {
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw PersonalizationError.sqlite }
     }
 
+    /// Turns recording and the profile on or off; while off, recording calls do nothing and `profile(at:)` returns nil.
     func setEnabled(_ value: Bool) { enabled = value }
 
+    /// Stores a shown impression; a repeated id is ignored. Throws for invalid ids, a model mismatch or an out-of-range
+    /// time.
     func recordRendered(_ impression: EditorialRenderedImpression) throws {
         guard enabled else { return }
         let (impressionID, articleID, topicID, vector, modelVersion, at) = (
@@ -254,12 +282,17 @@ actor EditorialPersonalization {
         sqlite3_bind_double(stmt, 5, at.timeIntervalSince1970)
         try done(stmt)
     }
+    /// Records a skip, which moves the profile away from the article unless the episode was already clicked or saved.
     func recordScrolledPast(impressionID: String, at: Date) throws {
         try record(.skip, id: impressionID, at: at)
     }
+    /// Records a click; throws `PersonalizationError.invalidInput` after the episode was scrolled past without
+    /// engagement.
     func recordClick(impressionID: String, at: Date) throws {
         try record(.click, id: impressionID, at: at)
     }
+    /// Records a save; throws `PersonalizationError.invalidInput` after the episode was scrolled past without
+    /// engagement.
     func recordSave(impressionID: String, at: Date) throws {
         try record(.save, id: impressionID, at: at)
     }
@@ -400,6 +433,8 @@ actor EditorialPersonalization {
         try done(stmt)
     }
 
+    /// The unit-length profile vector, or nil while disabled or before any reward moved it. Throws when `at` precedes
+    /// the last profile update.
     func profile(at: Date) throws -> [Float]? {
         guard enabled else { return nil }
         try prune(at: now())
@@ -411,10 +446,12 @@ actor EditorialPersonalization {
         guard norm.isFinite, norm > 0 else { return nil }
         return profile.vector.map { Float(Double($0) / norm) }
     }
+    /// Deletes impressions rendered more than 30 days before `at`; the profile stays.
     func prune(at: Date) throws {
         guard at.timeIntervalSince1970.isFinite else { throw PersonalizationError.invalidTime }
         try Self.expire(db, at: at)
     }
+    /// Deletes every impression, the profile and the reward clock in one transaction.
     func reset() throws {
         try execute("BEGIN IMMEDIATE")
         do {
@@ -426,6 +463,7 @@ actor EditorialPersonalization {
             throw error
         }
     }
+    /// Counts of stored impressions and recorded actions after pruning.
     func counts() throws -> PersonalizationCounts {
         try prune(at: now())
         let stmt = try prepare("SELECT count(*),count(skip),count(click),count(save) FROM impressions")
@@ -435,6 +473,7 @@ actor EditorialPersonalization {
             impressions: Int(sqlite3_column_int64(stmt, 0)), skips: Int(sqlite3_column_int64(stmt, 1)),
             clicks: Int(sqlite3_column_int64(stmt, 2)), saves: Int(sqlite3_column_int64(stmt, 3)))
     }
+    /// The store's size in bytes: page count times page size.
     func storageBytes() throws -> Int64 {
         func pragma(_ sql: String) throws -> Int64 {
             let stmt = try prepare(sql)

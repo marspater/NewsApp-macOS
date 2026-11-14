@@ -20,6 +20,7 @@ import Foundation
 /// Service providing on-device vector map projection, location coordinate resolution,
 /// and regional hotspot aggregation without external map tile requests (#718).
 public struct HotspotProjectionService: Sendable {
+    /// Creates the stateless service.
     public init() {}
 
     // MARK: - Geopolitical Region Anchors

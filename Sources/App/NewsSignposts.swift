@@ -20,17 +20,25 @@ import os
 /// Structured OSSignposter wrappers for Apple Instruments performance profiling.
 /// Emits lightweight signpost intervals with bounded metadata (no private/sensitive data).
 enum NewsSignposts {
+    /// The logging subsystem every category shares.
     static let subsystem = "com.marspater.news"
 
     /// One category per area (#564): the area's log lines and its signposts share it.
     static let feedsLog = Logger(subsystem: subsystem, category: "Feeds")
+    /// Log lines of the database area.
     static let databaseLog = Logger(subsystem: subsystem, category: "Database")
+    /// Log lines of launch timing.
     static let launchLog = Logger(subsystem: subsystem, category: "Launch")
 
+    /// Signposts of feed refresh, logged with `feedsLog`.
     static let feeds = OSSignposter(logger: feedsLog)
+    /// Signposts of database work, logged with `databaseLog`.
     static let database = OSSignposter(logger: databaseLog)
+    /// Signposts of enrichment jobs.
     static let enrichment = OSSignposter(subsystem: subsystem, category: "Enrichment")
+    /// Signposts of on-device analysis.
     static let intelligence = OSSignposter(subsystem: subsystem, category: "Intelligence")
+    /// Signposts of launch, logged with `launchLog`.
     static let launch = OSSignposter(logger: launchLog)
 
     @MainActor private static var firstCardReported = false
@@ -74,11 +82,14 @@ enum NewsSignposts {
 
     /// Times the consecutive stages of one piece of launch work and logs each stage's duration.
     struct StageTimer {
+        /// The name of the work every stage line carries.
         let work: String
         private var mark = ContinuousClock.now
 
+        /// Starts timing the first stage of `work`.
         init(_ work: String) { self.work = work }
 
+        /// Logs the time since the previous lap, or since the timer started, as `stage`, with an optional item count.
         mutating func lap(_ stage: String, count: Int? = nil) {
             let now = ContinuousClock.now
             let duration = now - mark

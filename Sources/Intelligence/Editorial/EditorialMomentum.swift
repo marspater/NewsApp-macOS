@@ -17,54 +17,85 @@
 
 import Foundation
 
+/// One stored article as the momentum replay reads it.
 struct MomentumReport: Sendable {
     let articleID: String
     let eventID: String
+    /// The report the article copies or is; articles sharing it count as one independent report. Nil or blank leaves
+    /// the article out.
     let wireGroupID: String?
+    /// The outlet that carried the article.
     let localPublisherID: String
+    /// Who originated the report; one wire group must have one origin. Nil or blank leaves the article out.
     let originPublisherID: String?
     let publishedAt: Date
+    /// When News first stored the article; never before `publishedAt`.
     let fetchedAt: Date
 }
 
+/// Bucket size, half-lives and floors for `EditorialMomentum.replay`; every interval is in seconds.
 struct MomentumConfiguration: Sendable {
+    /// The width of one replay bucket and the unit of the report rate.
     let bucketSeconds: TimeInterval
+    /// Half-life of the fast moving average; must be shorter than `longHalfLife`.
     let shortHalfLife: TimeInterval
+    /// Half-life of the slow moving average.
     let longHalfLife: TimeInterval
+    /// Half-life of the signal line, a moving average of the MACD.
     let signalHalfLife: TimeInterval
+    /// The trailing window whose independent reports and origins the floors count.
     let volumeWindow: TimeInterval
+    /// Independent reports the volume window needs before a bucket can be accelerating.
     let minimumIndependentReports: Int
+    /// Distinct origins the volume window needs before a bucket can be accelerating.
     let minimumOriginPublishers: Int
 }
 
+/// A bucket's momentum: accelerating needs a positive histogram and both floors; decelerating is a positive-to-negative
+/// histogram crossover.
 enum MomentumState: String, Sendable { case quiet, accelerating, decelerating }
 
+/// The moving averages and state at the end of one bucket.
 struct MomentumPoint: Sendable, Equatable {
     let bucketEnd: Date
+    /// Independent reports in the trailing volume window.
     let independentCount: Int
+    /// Distinct origins in the trailing volume window.
     let originCount: Int
     let shortEMA: Double
     let longEMA: Double
+    /// `shortEMA` minus `longEMA`.
     let macd: Double
     let signal: Double
+    /// `macd` minus `signal`.
     let histogram: Double
     let state: MomentumState
 }
 
+/// A replay's points and the data-quality counts behind them.
 struct MomentumSummary: Sendable {
     let points: [MomentumPoint]
     var latestPoint: MomentumPoint? { points.last }
+    /// Five times the longer of the long and signal half-lives; informational only.
     let warmupSeconds: TimeInterval
+    /// Whether the window is at least `warmupSeconds` long.
     let warmupComplete: Bool
+    /// The event's rows published and fetched inside the window.
     let rawRowsInWindow: Int
     let independentReportsInWindow: Int
     let independentOriginsInWindow: Int
+    /// Rows in the window without a wire group or origin, which the replay leaves out.
     let unknownMetadataRows: Int
+    /// Rows published after `through`.
     let futurePublicationRows: Int
+    /// Rows fetched after `through`.
     let futureFetchRows: Int
+    /// Rows in the window fetched more than one bucket after publication.
     let delayedFetchRows: Int
 }
 
+/// Why `EditorialMomentum.replay` refused its input: a bad configuration, a non-finite or out-of-order time, more than
+/// 50,000 reports or 10,000 buckets, or one wire group with two origins.
 enum MomentumError: Error { case invalidConfiguration, invalidTime, inputLimit, conflictingOrigin }
 
 /// Experimental retrospective replay, using all reports available as of `through` and bucketing by publication time.
@@ -111,6 +142,10 @@ enum EditorialMomentum {
         }
     }
 
+    /// Replays one event's independent reports, the earliest per wire group, in publication buckets from `windowStart`
+    /// to `through`.
+    ///
+    /// Throws `MomentumError` for invalid input and `CancellationError` when the task is cancelled between buckets.
     static func replay(
         reports: [MomentumReport], eventID: String, windowStart: Date, through: Date,
         configuration: MomentumConfiguration

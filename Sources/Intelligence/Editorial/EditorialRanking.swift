@@ -18,19 +18,30 @@
 import Accelerate
 import Foundation
 
+/// One already-formed candidate for `EditorialRanking.rank`; ids must be unique and non-empty.
 struct EditorialRankingCandidate: Sendable {
     let id: String
+    /// Base relevance from 0 to 1.
     let relevance: Double
+    /// The time that decays the similarity between two candidates.
     let date: Date
+    /// A unit-length 384-dimension embedding; nil contributes no similarity penalty.
     let vector: [Float]?
+    /// The model that made `vector`; must match the configuration's when `vector` is set.
     let embeddingModelVersion: String?
+    /// The reader's preference from -1 to 1, added to relevance scaled by `preferenceWeight`.
     let preference: Double?
 }
 
+/// Weights for `EditorialRanking.rank`.
 struct EditorialRankingConfiguration: Sendable {
+    /// From 0 to 1: the share of the score given to relevance; the rest penalizes similarity to picks already made.
     let relevanceWeight: Double
+    /// The time constant of the exponential decay that makes far-apart candidates less similar; must be positive.
     let temporalDecaySeconds: TimeInterval
+    /// From 0 to 1: how much a candidate's preference moves its relevance.
     let preferenceWeight: Double
+    /// The only embedding model whose vectors are accepted; must not be empty.
     let embeddingModelVersion: String
 
     init(
@@ -44,17 +55,27 @@ struct EditorialRankingConfiguration: Sendable {
     }
 }
 
+/// One pick, in ranking order, with the score that chose it.
 struct EditorialRankingSelection: Sendable {
     let id: String
     let score: Double
+    /// Relevance after the preference adjustment, clamped to 0 through 1.
     let relevance: Double
+    /// The highest time-decayed cosine similarity to an earlier pick.
     let penalty: Double
 }
 
+/// Why ranking refused its input: a weight out of range, an invalid or duplicate candidate, or more than 500 candidates
+/// or a limit above 50.
 enum EditorialRankingError: Error { case invalidConfiguration, invalidCandidate, inputLimit }
 
 /// Bounded experimental reranking of already-formed candidates; event membership is unchanged.
 enum EditorialRanking {
+    /// Picks up to `limit` candidates greedily, maximal marginal relevance style: each pick maximizes weighted
+    /// relevance minus the weighted similarity to earlier picks.
+    ///
+    /// Ties go to the lower id. Throws `EditorialRankingError` for invalid input and `CancellationError` when
+    /// cancelled.
     static func rank(
         candidates: [EditorialRankingCandidate], limit: Int,
         configuration: EditorialRankingConfiguration

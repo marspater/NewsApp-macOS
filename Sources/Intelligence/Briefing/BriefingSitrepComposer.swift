@@ -22,15 +22,22 @@ import Foundation
 enum BriefingSitrepComposer {
     /// Highlights the sentence may restate.
     static let factLimit = 3
+    /// The longest sentence `isValid(_:inputs:)` accepts, in characters.
     static let maximumLength = 220
 
+    /// One overview highlight the sentence may restate.
     struct Highlight: Equatable, Sendable {
+        /// The highlight's text.
         let text: String
+        /// The publisher of the highlight's first named citation; nil when no citation names one.
         let publisher: String?
     }
 
+    /// The sitrep line a thread shows.
     struct Line: Equatable, Sendable {
+        /// The model's sentence, or the first highlight's text when it was not kept.
         let text: String
+        /// True when `text` is the model's sentence rather than the first highlight.
         let isGenerated: Bool
         /// True only when the model ran: its sentence was kept, or it answered and the answer was rejected. A line made
         /// while the model was off or unavailable is not cached, so a later load can generate.
@@ -46,6 +53,12 @@ enum BriefingSitrepComposer {
         }
     }
 
+    /// Asks the model for one sentence restating the first `factLimit` highlights and keeps it only when
+    /// `accepts(_:title:highlights:)` passes.
+    ///
+    /// Returns nil when there are no highlights. An answer `accepts(_:title:highlights:)` turns down, or a
+    /// `NewsTextModel.Rejected` error, falls back to the first highlight as a final line; any other model error returns
+    /// that highlight as a non-final line, so a later load can try again.
     static func compose(title: String, highlights: [Highlight], model: NewsTextModel) async -> Line? {
         let highlights = Array(highlights.prefix(factLimit))
         guard let first = highlights.first else { return nil }

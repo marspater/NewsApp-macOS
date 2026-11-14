@@ -22,11 +22,15 @@ import os
 /// Pure-Swift WordPiece tokenizer for standard BERT / MiniLM / BGE vocabularies.
 /// One pair of texts as the pair model reads it (#525).
 struct PairEncoding: Equatable, Sendable {
+    /// `[CLS] a [SEP] b [SEP]` as vocabulary ids, padded with `[PAD]`.
     var inputIDs: [Int32]
+    /// 1 for each real token, 0 for padding.
     var attentionMask: [Int32]
+    /// 0 for `[CLS]`, the first text and its `[SEP]`; 1 for the second text and the final `[SEP]`; 0 for padding.
     var tokenTypeIDs: [Int32]
 }
 
+/// The uncased BERT WordPiece tokenizer shared by the sentence embedder and the pair model.
 final class BertWordPieceTokenizer: Sendable {
     private let vocab: [String: Int]
     private let unkTokenId: Int
@@ -34,6 +38,8 @@ final class BertWordPieceTokenizer: Sendable {
     private let sepTokenId: Int
     private let padTokenId: Int
 
+    /// Loads a vocabulary file with one token per line, its line number the id. Throws when the file cannot be read as
+    /// UTF-8.
     init(vocabURL: URL) throws {
         let content = try String(contentsOf: vocabURL, encoding: .utf8)
         var dict: [String: Int] = [:]
@@ -184,10 +190,13 @@ func bundledModelResource(_ name: String, _ ext: String) -> URL {
 
 /// On-device neural sentence embedding engine using bundled CoreML + Accelerate vDSP (#127, #307).
 actor SentenceEmbedder {
+    /// The embedder the app uses, loaded from the bundled model.
     static let shared = SentenceEmbedder()
     /// Bump when the tokenizer or the embedded text changes; stored vectors of older versions are recomputed.
     static let modelVersion = 2
+    /// The size of every embedding.
     static let vectorDimension = 384
+    /// The most tokens a text is encoded to, special tokens included; longer text is truncated.
     static let maxSequenceLength = 128
     /// The model's functions (#554): `convert_minilm.py` exports one fixed-length function per entry, `length_16` to
     /// `length_128`, sharing one set of weights, and each text runs in the shortest that holds it. A flexible 1–128
@@ -380,7 +389,9 @@ actor SentenceEmbedder {
 /// related, same); a binary model through `probability`, read as related 0. Unavailable without the bundled model;
 /// the matcher then decides as it did before.
 actor PairScorer {
+    /// The scorer the app uses, loaded from the bundled model.
     static let shared = PairScorer()
+    /// The most tokens a pair is encoded to, special tokens included.
     static let maxSequenceLength = 256
     /// The model's functions (#554): `length_64`, `length_128` and `length_256` share one set of weights, and a pair
     /// runs padded to the shortest that holds it, the padding masked out. A model of one 256-token function (a candidate
@@ -426,6 +437,7 @@ actor PairScorer {
         self.models = models
     }
 
+    /// True when the model and vocabulary loaded; when false, the matcher decides without the pair model.
     var isAvailable: Bool { !models.isEmpty && tokenizer != nil }
 
     /// The probability that the two texts report one event; event admission reads this (#627).

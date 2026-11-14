@@ -21,13 +21,18 @@ import NaturalLanguage
 /// Cheap, deterministic signals for finding articles that may report the same event. They only
 /// narrow the search; whether two articles describe one event is decided by the matcher.
 struct EventMatchKey: Hashable, Sendable {
+    /// The most search terms one key carries.
     static let maximumTerms = 8
     private static let minimumWordLength = 4
     private static let languagePrefix = 600
 
+    /// The recognized language of the title and the description's opening; nil when undecided.
     let language: String?
+    /// Headline names, then distinctive headline words, then description names: unique, at least four characters and
+    /// holding a letter, at most `maximumTerms`.
     let terms: [String]
 
+    /// Builds the key from an article's title and the first 600 characters of its description.
     init(title: String, description: String) {
         let text = title + "\n" + String(description.prefix(Self.languagePrefix))
         language = Self.language(of: text)
@@ -67,6 +72,7 @@ struct EventMatchKey: Hashable, Sendable {
         self.terms = terms
     }
 
+    /// Builds the key from the article's title and description.
     init(article: FeedArticle) {
         self.init(title: article.title, description: article.description)
     }
@@ -93,13 +99,18 @@ struct EventMatchKey: Hashable, Sendable {
 /// Bounds that keep candidate generation incremental: a time window around the article, a cap on
 /// candidates, and a lifetime after which an event no longer gains members.
 struct EventCandidatePolicy: Sendable {
+    /// How far either side of the article's date a candidate may be published.
     var window: TimeInterval = 48 * 3600
+    /// How long after its last update an event is still active and gains new members.
     var activeEventLifetime: TimeInterval = 72 * 3600
+    /// The most candidates one article gets.
     var limit = 40
 
+    /// The bounds clustering uses: 48 hours, a 72-hour event lifetime and 40 candidates.
     static let standard = EventCandidatePolicy()
 }
 
+/// An article the matcher should compare a new article with.
 struct EventCandidate: Hashable, Sendable {
     let articleID: String
     /// The active event the candidate already belongs to, if any.
@@ -110,10 +121,14 @@ struct EventCandidate: Hashable, Sendable {
 /// that lands while the pass is suspended is never answered with the old language, and a pass over a large library
 /// retains no row text. The hash only lives for the pass, so its per-process seed does not matter.
 struct EventCandidateLanguage: Equatable, Sendable {
+    /// The per-process hash of `EventCandidateFinder.languageText(title:description:)` the language was read from.
     var textHash: Int
+    /// The recognized language; nil when undecided.
     var language: String?
 }
 
+/// Finds the stored articles a new article could share an event with, through the full-text index and bounded by
+/// `EventCandidatePolicy`.
 enum EventCandidateFinder {
     /// The text a row's language is recognized from.
     static func languageText(title: String, description: String) -> String {
@@ -197,22 +212,32 @@ enum EventCandidateFinder {
 
 /// A navigation candidate, never a clustering decision or an asserted event date.
 struct RelatedStoryEvent: Hashable, Sendable {
+    /// The earlier event.
     let eventID: String
+    /// The earlier event's first member, which the link opens.
     let articleID: String
+    /// The first member's headline.
     let title: String
+    /// The first member's publication date.
     let firstPublishedAt: Date
 }
 
 /// Read-only relation behind the overview's "Earlier in This Story" links. It never merges events; missing signals
 /// deliberately produce no link.
 enum EventStoryRelation {
+    /// How long before the target's first report an earlier event may start and still be linked: seven days.
     static let window: TimeInterval = 7 * 86400
+    /// The most earlier events compared.
     static let candidateLimit = 40
+    /// The most links returned.
     static let linkLimit = 3
+    /// Events with more members than this, target or candidate, are not compared.
     static let memberLimit = 100
     /// An actor in more of the week's events than this share does not, alone, tie two events together.
     static let commonActorShare = 0.05
 
+    /// The earlier events the overview links under "Earlier in This Story", read from the database and compared off the
+    /// database and main actors. Throws database errors and `CancellationError`.
     static func find(eventID: String, in database: DatabaseEngine) async throws -> [RelatedStoryEvent] {
         let snapshot = try await database.relatedStoryEventRows(eventID: eventID)
         // Signals the clusterer stored (#522); the rest are extracted here and, as before, never written.
@@ -278,6 +303,12 @@ enum EventStoryRelation {
         known[row.id] ?? EventFeatures(title: row.title, description: row.description, date: row.date)
     }
 
+    /// Earlier events that two thirds of their members and two thirds of the target's members support, newest first, at
+    /// most `linkLimit`.
+    ///
+    /// A candidate is skipped when it is the target's own event, too large, or has a member that is undated, not before
+    /// the target's first report or more than `window` earlier. Returns no links for an empty, oversized or partly
+    /// undated target. Throws `CancellationError`.
     static func links(
         target: [EventMatchRow], candidates: [(id: String, members: [EventMatchRow])],
         commonActors: Set<String> = [], features known: [String: EventFeatures] = [:]

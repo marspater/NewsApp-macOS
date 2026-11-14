@@ -20,11 +20,13 @@ import Foundation
 struct HotspotPlace: Sendable {
     /// Lower-case names a headline may use, the first the one the map shows.
     let names: [String]
+    /// The place's center: the city itself, or the middle of an area.
     let coordinate: GeographicCoordinate
     /// A country, a sea or a region: the coordinate is the center of an area and the map draws it as one. A city is a
     /// point. Neither is ever where an event happened (DESIGN.md 17: never claim more than the data shows).
     let isArea: Bool
 
+    /// Creates an entry from its names, the shown one first, and its coordinate in degrees.
     init(_ names: [String], _ latitude: Double, _ longitude: Double, isArea: Bool) {
         self.names = names
         self.coordinate = GeographicCoordinate(latitude: latitude, longitude: longitude)

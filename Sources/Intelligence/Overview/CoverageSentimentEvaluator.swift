@@ -42,10 +42,14 @@ public struct CorpusEvaluationItem: Sendable {
     public let id: String
     public let headline: String
     public let text: String
+    /// The article's language code.
     public let language: String
+    /// The real-world nature of the reported event.
     public let eventNature: EventNature
+    /// The labeled tone of the writing.
     public let groundTruthTone: JournalisticToneGroundTruth
 
+    /// Creates a labeled corpus item.
     public init(
         id: String,
         headline: String,
@@ -65,16 +69,26 @@ public struct CorpusEvaluationItem: Sendable {
 
 /// Measured metrics from evaluating coverage sentiment across the journalistic corpus.
 public struct CoverageSentimentMetrics: Sendable, Equatable {
+    /// Corpus items evaluated.
     public let totalEvaluated: Int
+    /// Items that report an adverse event in an objective tone.
     public let objectiveCrisisCount: Int
+    /// Objective crisis items the raw tagger scored below -0.2 or labeled critical.
     public let objectiveCrisisFalseNegatives: Int
+    /// `objectiveCrisisFalseNegatives` over `objectiveCrisisCount`; 0 when there are none.
     public let falseNegativityOnObjectiveEvents: Double
+    /// Catalog languages with a sentiment model.
     public let supportedLanguagesCount: Int
+    /// Catalog languages checked.
     public let totalCatalogLanguagesCount: Int
+    /// `supportedLanguagesCount` over `totalCatalogLanguagesCount`.
     public let multilingualCoverageRate: Double
+    /// True when false negativity is at most 15 % and multilingual coverage at least 80 %.
     public let justifiesOverviewSection: Bool
+    /// A sentence explaining the verdict.
     public let rationale: String
 
+    /// Creates metrics from measured counts and rates.
     public init(
         totalEvaluated: Int,
         objectiveCrisisCount: Int,
@@ -100,13 +114,20 @@ public struct CoverageSentimentMetrics: Sendable, Equatable {
 
 /// Calibrated tone assessment result for individual text passages or diagnostic inspections.
 public struct ToneAssessment: Sendable, Equatable {
+    /// The NaturalLanguage sentiment score, from -1 to 1.
     public let rawScore: Double
+    /// The score after calibration: 0 when adverse vocabulary confounded it, otherwise `rawScore`.
     public let calibratedScore: Double
+    /// "Positive", "Neutral" or "Critical".
     public let label: String
+    /// Confidence from 0 to 1.
     public let confidence: Double
+    /// True when adverse event words without editorial markers pulled the raw score negative.
     public let isConfoundedByEventAdversity: Bool
+    /// A sentence explaining the label.
     public let rationale: String
 
+    /// Creates an assessment from its scores, label and rationale.
     public init(
         rawScore: Double,
         calibratedScore: Double,

@@ -21,15 +21,21 @@ import NaturalLanguage
 
 /// Kind of critical error that blocks generative overview release.
 public enum CriticalErrorKind: String, Codable, Sendable, Equatable, Hashable {
+    /// The claim states a number its passages do not.
     case numberMismatch
+    /// The claim states a year its passages do not.
     case dateMismatch
+    /// The claim misattributes a statement, or a citation quote is not verbatim in its passage.
     case attributionError
 }
 
 /// Audit status for a single factual claim in an overview document.
 public enum ClaimSupportStatus: Sendable, Equatable {
+    /// Every check passed.
     case supported
+    /// The claim has no citation, an unknown citation or an ungrounded term.
     case unsupported(reason: String)
+    /// The claim fails a check that blocks releasing a generated overview.
     case criticalError(kind: CriticalErrorKind, detail: String)
 }
 
@@ -37,20 +43,25 @@ public enum ClaimSupportStatus: Sendable, Equatable {
 public struct ClaimAuditResult: Sendable, Equatable, Identifiable {
     public let id: String
     public let claimText: String
+    /// The citations the claim refers to.
     public let citationIDs: [String]
     public let status: ClaimSupportStatus
+    /// The passages resolved and checked before the audit stopped.
     public let auditedPassageIDs: [String]
 
+    /// True when the status is `supported`.
     public var isSupported: Bool {
         if case .supported = status { return true }
         return false
     }
 
+    /// The kind of a critical error; nil for any other status.
     public var criticalErrorKind: CriticalErrorKind? {
         if case .criticalError(let kind, _) = status { return kind }
         return nil
     }
 
+    /// Creates an audit result.
     public init(
         id: String,
         claimText: String,

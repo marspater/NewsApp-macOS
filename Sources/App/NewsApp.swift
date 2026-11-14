@@ -25,6 +25,8 @@ import UserNotifications
 
     /// Dev builds only: forwards this app's warning, error and fault log entries to Sentry Logs every 30 seconds.
     enum SentryLogForwarder {
+        /// Starts the detached forwarding loop; it runs until its task is cancelled. Messages are redacted before
+        /// sending.
         static func start() {
             Task.detached(priority: .utility) {
                 let subsystem = NSPredicate(format: "subsystem == %@", "com.marspater.news")
@@ -62,6 +64,7 @@ import UserNotifications
         /// when this forwarder sends it, up to 30 seconds later.
         static let loggedAtKey = "os_log.timestamp"
 
+        /// Dates a forwarded log at the time it was logged, read from `loggedAtKey`; other logs pass unchanged.
         static func stamp(_ log: SentryLog) -> SentryLog {
             if let loggedAt = log.attributes[loggedAtKey]?.value as? Double {
                 log.timestamp = Date(timeIntervalSince1970: loggedAt)
@@ -71,19 +74,30 @@ import UserNotifications
     }
 #endif
 
-/// Notification posted when the user clicks a notification banner or uses keyboard navigation.
+/// Menu and keyboard commands the app's menus post (next and previous also Quick Look) for the list, reader and
+/// sidebar in front to act on.
 extension Notification.Name {
+    /// Refresh Feeds: the story list refreshes the feeds.
     static let refreshFeedsCommand = Notification.Name("refreshFeedsCommand")
+    /// Mark All as Read for the story list in front.
     static let markAllReadCommand = Notification.Name("markAllReadCommand")
+    /// Moves to the next story in the list, the reader or Quick Look.
     static let nextArticleCommand = Notification.Name("nextArticleCommand")
+    /// Moves to the previous story in the list, the reader or Quick Look.
     static let prevArticleCommand = Notification.Name("prevArticleCommand")
+    /// Toggles read for the selected or open story.
     static let toggleReadCommand = Notification.Name("toggleReadCommand")
+    /// Toggles saved for the selected or open story.
     static let toggleSaveCommand = Notification.Name("toggleSaveCommand")
+    /// Opens the selected or open story in the browser.
     static let openInBrowserCommand = Notification.Name("openInBrowserCommand")
+    /// Show New Stories: the story list shows the stories waiting from a refresh.
     static let showFeedUpdatesCommand = Notification.Name("showFeedUpdatesCommand")
+    /// File › New Smart Binder: the sidebar starts a new binder.
     static let newSmartBinderCommand = Notification.Name("newSmartBinderCommand")
 }
 
+/// The app's scenes and menu commands, with the shared stores in the environment.
 struct NewsApp: App {
     @FocusedValue(\.archiveSearch) private var archiveSearch
     @FocusedValue(\.selectedStory) private var selectedStory
@@ -92,6 +106,7 @@ struct NewsApp: App {
     @FocusedValue(\.listActions) private var listActions
     @FocusedValue(\.addFeedSubscription) private var addFeedSubscription
     @Environment(\.openWindow) private var openWindow
+    /// The delegate that handles launch, termination, Quick Look and notification responses.
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appContainer = AppContainer.shared
     @StateObject private var appSettings = AppSettings.shared
@@ -493,6 +508,7 @@ struct LogWindowCommands: Commands {
     }
 }
 
+/// File › New Smart Binder, Back Up Library and Restore Library.
 struct FileCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -511,6 +527,7 @@ struct FileCommands: Commands {
 
 /// Help → Keyboard Shortcuts opens the single-key shortcut list in its own window.
 struct KeyboardShortcutsCommands: Commands {
+    /// The id of the Keyboard Shortcuts window.
     static let windowID = "keyboard-shortcuts"
     @Environment(\.openWindow) private var openWindow
     @State private var updateChecker = UpdateChecker.shared
@@ -558,6 +575,8 @@ struct KeyboardShortcutsCommands: Commands {
     }
 }
 
+/// Starts launch services (offline cache, notification categories, the permission request and the update check), stores
+/// state before the app quits and routes responses to banners an earlier build left.
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var notificationPermission: NotificationPermissionRequest?

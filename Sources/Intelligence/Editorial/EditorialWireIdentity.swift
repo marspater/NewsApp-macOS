@@ -18,10 +18,13 @@ import Foundation
 
 /// One stored article as the identity mapping reads it. `fetchedAt` is when News first stored it.
 struct WireIdentityArticle: Sendable {
+    /// The stored article's id.
     let articleID: String
+    /// The outlet name; empty counts as no publisher.
     let publisher: String
     let title: String
     let description: String
+    /// The extracted full text, when stored.
     let content: String?
     let publishedAt: Date
     let fetchedAt: Date
@@ -31,6 +34,7 @@ struct WireIdentityArticle: Sendable {
 
 /// Who an article's report comes from, or an explicit nil where the stored text cannot say.
 struct WireIdentity: Sendable, Equatable {
+    /// The evidence an identity rests on.
     enum Basis: String, Sendable, CaseIterable {
         /// The feed's author field or a byline-position credit names one agency, here or in a near-identical copy.
         case credited
@@ -47,7 +51,11 @@ struct WireIdentity: Sendable, Equatable {
     }
 
     let articleID: String
+    /// The report the article belongs to: `wire:` plus the credited agencies, `copy:` or `report:` plus the group's
+    /// lowest article id; nil when the text cannot say.
     let wireGroupID: String?
+    /// Who originated the report: `agency:`, `publisher:` or `unattributed:`; nil when unknown or several agencies
+    /// share credit.
     let originPublisherID: String?
     let basis: Basis
 }

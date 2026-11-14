@@ -28,16 +28,23 @@ import UserNotifications
 /// (#1006). It holds no story text: URLs keep only their host, home folders become `~`, and the titles of loaded
 /// stories are replaced.
 enum DiagnosticsExport {
+    /// One unified log entry of the app's subsystem, its message redacted.
     struct LogLine: Equatable, Sendable {
         let date: Date
         let category: String
+        /// The level's name, one of `levels` or "Default".
         let level: String
+        /// The message with private values replaced by `<private>`.
         let message: String
     }
 
+    /// How far back the export reads the log and recent state: 24 hours.
     static let window: TimeInterval = 24 * 60 * 60
+    /// The name of the exported folder and the zip's default name.
     static let folderName = "News Diagnostics"
 
+    /// Asks where to save, then gathers the summary, the state snapshot and the log and writes the zip off the main
+    /// actor; errors show in an alert.
     @MainActor
     static func run(settings: AppSettings, feedManager: FeedManager, articleStore: ArticleStore) {
         let panel = NSSavePanel()
@@ -100,6 +107,7 @@ enum DiagnosticsExport {
         }.joined()
     }
 
+    /// The log level names, lowest first.
     static let levels = ["Debug", "Info", "Notice", "Error", "Fault"]
 
     private static func name(of level: OSLogEntryLog.Level) -> String {
@@ -113,6 +121,7 @@ enum DiagnosticsExport {
         }
     }
 
+    /// The summary file: app, build, macOS and schema versions, the settings that shape behavior and the feed health.
     @MainActor
     static func summary(settings: AppSettings, feedHealth: [String: FeedHealth], schema: Int?, now: Date) -> String {
         func onOff(_ value: Bool) -> String { value ? "on" : "off" }
@@ -211,38 +220,62 @@ enum DiagnosticsExport {
 
     /// What the export reads from the main actor and the other actors before it leaves for the background.
     struct AppSnapshot: Sendable {
+        /// The subscribed feed URLs.
         var feedURLs: [String] = []
         /// Nil when the library could not be read: the export says so instead of reporting empty states.
         var feedStates: [String: FeedFetchState]? = [:]
         /// Per feed: idle, loading or the failure kind (`failureKind`).
         var feedStatuses: [String: String] = [:]
+        /// The last event clustering pass.
         var lastClusteringPass: FeedManager.ClusteringPass?
+        /// The last story image lookup.
         var lastImageLookup: StoryCurator.Report?
+        /// Whether the sentence embedder loaded.
         var embedderAvailable = false
+        /// Whether the pair model loaded.
         var pairModelAvailable = false
+        /// The system language model's availability, from `foundationModelsAvailability()`.
         var foundationModels = "unknown"
+        /// Enrichment jobs by state.
         var enrichmentStates: [String: Int] = [:]
+        /// Overview work in flight and this session's failures.
         var overviews = OverviewGenerationCoordinator.Counts()
+        /// The notification settings as lines, from `notificationSettingsLines(_:)`.
         var notificationSettings: [String] = []
+        /// The local network gateway's port; nil when it is not running.
         var gatewayPort: UInt16?
+        /// Proxy resolver lookups cancelled before they answered.
         var resolverCancellations = 0
+        /// Gateway timings per host.
         var gatewayTimes: [String: GatewayTimings.HostTimes] = [:]
+        /// Recent network requests.
         var networkEntries: [NetworkTimeline.Entry] = []
+        /// Recent refresh batches.
         var refreshBatches: [NetworkTimeline.Batch] = []
+        /// The system proxy settings as lines.
         var proxy: [String] = []
+        /// The process and system state.
         var process = ProcessSnapshot()
+        /// Saved stories.
         var savedStories = 0
+        /// Whether Spotlight indexing is available.
         var spotlightAvailable = false
+        /// The shared URL cache's memory and disk use and capacities, in bytes.
         var urlCache = (memory: 0, disk: 0, memoryCapacity: 0, diskCapacity: 0)
+        /// The size of the app's cache folder.
         var cacheFolderBytes: Int64 = 0
     }
 
+    /// The process and accessibility state the export reports.
     struct ProcessSnapshot: Sendable {
         var lowPowerMode = false
         var thermalState = "nominal"
+        /// The process's memory footprint; nil when it could not be read.
         var footprintBytes: UInt64?
+        /// When the process started; nil when it could not be read.
         var launchedAt: Date?
         var locale = ""
+        /// The display's backing scale; nil when unknown.
         var displayScale: Double?
         var reduceMotion = false
         var increaseContrast = false
@@ -670,6 +703,7 @@ enum DiagnosticsExport {
         try await database.eventRows(sql, values).first?.first ?? nil
     }
 
+    /// `bytes` formatted as a file size.
     static func byteText(_ bytes: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
@@ -721,6 +755,8 @@ enum DiagnosticsExport {
         return app
     }
 
+    /// `available`, `unavailable` with the system's reason in parentheses, or `unavailable (needs macOS 26)` when
+    /// this build or system has no FoundationModels.
     static func foundationModelsAvailability() -> String {
         #if canImport(FoundationModels)
             if #available(macOS 26.0, *) {
@@ -733,6 +769,7 @@ enum DiagnosticsExport {
         return "unavailable (needs macOS 26)"
     }
 
+    /// The notification authorization and delivery settings, one line each.
     static func notificationSettingsLines(_ settings: UNNotificationSettings) -> [String] {
         [
             "Authorization: \(name(of: settings.authorizationStatus))",

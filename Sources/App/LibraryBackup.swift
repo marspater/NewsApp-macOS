@@ -20,6 +20,7 @@ import UniformTypeIdentifiers
 enum LibraryBackup {
     private static var backupType: UTType { UTType(filenameExtension: "sqlite3") ?? .data }
 
+    /// Asks where to save, then writes a backup of the library and the app's settings there; errors show in an alert.
     @MainActor static func backUpLibrary() {
         let panel = NSSavePanel()
         panel.title = "Back Up Library"
@@ -38,6 +39,8 @@ enum LibraryBackup {
         }
     }
 
+    /// Asks for a backup and confirmation, replaces the library (and the settings the backup holds) with it, then
+    /// relaunches News. A refused or failed restore leaves the library unchanged and shows the error.
     @MainActor static func restoreLibrary() {
         let panel = NSOpenPanel()
         panel.title = "Restore Library"

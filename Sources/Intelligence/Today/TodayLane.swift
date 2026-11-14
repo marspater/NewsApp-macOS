@@ -61,10 +61,14 @@ enum TodayLane: String, CaseIterable, Sendable, Hashable {
         }
     }
 
+    /// True for the four lanes that show only when at least `minimumCount` stories qualify; false for The Lead and The
+    /// Latest.
     var isConditional: Bool {
         self != .theLead && self != .theLatest
     }
 
+    /// The fewest qualifying stories the lane needs to show; below it a conditional lane stays hidden and its stories
+    /// fall through to the next lane.
     var minimumCount: Int {
         switch self {
         case .theLead: return 1
@@ -73,6 +77,8 @@ enum TodayLane: String, CaseIterable, Sendable, Hashable {
         }
     }
 
+    /// The most stories the lane holds, its best-ranked ones; the rest fall through. Nil for The Latest, which has no
+    /// cap.
     var cap: Int? {
         switch self {
         case .theLead: return 5
@@ -97,11 +103,17 @@ enum TodayContentType: String, CaseIterable, Sendable, Hashable {
 /// Initial starting values follow `docs/plans/2026-11-09-today-edition-spec.md` §2.2; final values
 /// are verified by the Z2 shadow evaluation. Editorial thresholds remain separate from notification thresholds.
 struct TodayEditionThresholds: Equatable, Sendable {
+    /// The score a story with two or more original reports needs for The Lead.
     var leadMultiReportScoreMinimum = 0.60
+    /// The score a single-report story needs for The Lead.
     var leadSingleReportScoreMinimum = 0.75
+    /// The placement confidence The Lead needs.
     var leadMinimumConfidence = 0.50
 
+    /// The In Motion window: a report older than it shows the story was underway, and a report inside it is the new
+    /// one.
     var inMotionWindowSeconds: TimeInterval = 24 * 3600
+    /// The placement confidence In Motion needs.
     var inMotionMinimumConfidence = 0.70
     /// Evaluation option, off by default (#934, 11 November 2026). When set, In Motion asks two separate questions:
     /// is the story already underway (a report older than ``inMotionWindowSeconds``), and how recent is the new
@@ -112,12 +124,18 @@ struct TodayEditionThresholds: Equatable, Sendable {
     /// the headline test for a substantive update still applies.
     var inMotionRequiresRisingMomentum = true
 
+    /// The reading time that qualifies a story for The Deep Read by length alone.
     var deepReadMinimumMinutes = 8.0
+    /// The reading speed reading time is estimated with.
     var deepReadWordsPerMinute = 200.0
+    /// The content-type classifier confidence that qualifies a story for The Deep Read by type.
     var deepReadClassificationMinimumConfidence = 0.70
+    /// The placement confidence The Deep Read needs.
     var deepReadMinimumConfidence = 0.60
 
+    /// The interest match that qualifies a story for Your Beat on its own.
     var yourBeatInterestMatchMinimum = 0.50
+    /// The placement confidence Your Beat needs.
     var yourBeatMinimumConfidence = 0.60
     /// Evaluation option (#934, 11 November 2026). Above zero, publisher affinity is a booster: it qualifies a
     /// story for Your Beat only together with an interest match of at least this value. Starred feeds and an
@@ -125,27 +143,39 @@ struct TodayEditionThresholds: Equatable, Sendable {
     var yourBeatAffinityInterestMinimum = 0.0
     /// Evaluation option, off by default (#934, 12 November 2026). When set, Your Beat's affinity publishers are
     /// the top quartile of engaged publishers by engagement per story published in the profile window, less those
-    /// with fewer than this many read or saved stories (``TodayUserProfile/perStoryAffinityPublishers``). The
+    /// with fewer than this many read or saved stories
+    /// (`TodayUserProfile.perStoryAffinityPublishers(weights:windowWeights:storiesRead:published:floor:)`). The
     /// loader counts the stories each publisher published only while this is set.
     var yourBeatAffinityPerStoryFloor: Int?
 
+    /// The novelty Outside Your Usual needs.
     var outsideNoveltyMinimum = 0.60
+    /// The score Outside Your Usual needs.
     var outsideScoreMinimum = 0.35
+    /// The placement confidence Outside Your Usual needs.
     var outsideMinimumConfidence = 0.60
 
+    /// Publishers the Coverage card variant needs.
     var coverageMinimumPublishers = 3
+    /// Original reports the Coverage card variant needs.
     var coverageMinimumOriginalReports = 2
+    /// Grouping confidence the Coverage card variant needs.
     var coverageMinimumGroupingConfidence = 0.70
 
+    /// How recent a report must be for the Developing pill.
     var developingWindowSeconds: TimeInterval = 3600
 
+    /// The shipped thresholds.
     static let standard = TodayEditionThresholds()
 }
 
 /// Output contract per story entry placed in a Today lane (`#934`).
 struct TodayStoryAssignment: Identifiable, Equatable, Sendable {
+    /// The story's id.
     let id: String
+    /// The story as the list shows it.
     let entry: FeedEntry
+    /// The lane the story was placed in.
     let lane: TodayLane
     /// Editorial relevance score (`0.0...1.0`), calibrated separately from notification thresholds.
     let score: Double
@@ -166,24 +196,34 @@ struct TodayStoryAssignment: Identifiable, Equatable, Sendable {
     let isDeveloping: Bool
 
     // Evaluation & diagnostic scalars (no private text).
+    /// Original reports in the story's event.
     let originalReportCount: Int
+    /// Distinct publishers in the story's event.
     let publisherCount: Int
+    /// Confidence that the event's reports belong together.
     let groupingConfidence: Double
+    /// Estimated reading time.
     let readingTimeMinutes: Double
+    /// How closely the story matches the reader's interests, from 0 to 1.
     let interestMatch: Double
+    /// How far the story is from the reader's usual reading, from 0 to 1.
     let novelty: Double
 }
 
 /// One lane's assignment outcome, carrying both whether the lane qualifies for display and its entries.
 struct TodayLaneResult: Identifiable, Equatable, Sendable {
     var id: TodayLane { lane }
+    /// The lane the result belongs to.
     let lane: TodayLane
+    /// Whether the lane shows: The Latest always, the others when they placed a story.
     let qualifies: Bool
+    /// The lane's stories in display order.
     let entries: [TodayStoryAssignment]
 }
 
 /// Complete deterministic result of one Today edition assignment pass.
 struct TodayEditionPlan: Equatable, Sendable {
+    /// One result per lane, in assignment order.
     let lanes: [TodayLaneResult]
 
     /// Lanes in page display order (`Your Beat` shown above `The Deep Read`).
@@ -192,14 +232,17 @@ struct TodayEditionPlan: Equatable, Sendable {
         return TodayLane.displayOrder.compactMap { byLane[$0] }
     }
 
+    /// The result for one lane.
     func result(for lane: TodayLane) -> TodayLaneResult? {
         lanes.first { $0.lane == lane }
     }
 
+    /// The stories placed in one lane; empty when the lane has none.
     func entries(for lane: TodayLane) -> [TodayStoryAssignment] {
         result(for: lane)?.entries ?? []
     }
 
+    /// Every placed story, lane by lane in assignment order.
     var allAssignments: [TodayStoryAssignment] {
         lanes.flatMap(\.entries)
     }

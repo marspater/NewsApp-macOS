@@ -19,11 +19,16 @@ import UserNotifications
 
 /// Notification category and action identifiers for interactive story alerts (#560).
 enum NotificationActionIdentifier {
+    /// The category of story banners that carry the three actions.
     static let category = "ARTICLE_ACTIONS"
+    /// The Save action.
     static let save = "SAVE_ACTION"
+    /// The Mark as Read action.
     static let markRead = "MARK_READ_ACTION"
+    /// The Open action, which brings the app to the front.
     static let open = "OPEN_ACTION"
 
+    /// The story banner category with its Save, Mark as Read and Open actions.
     static func makeCategory() -> UNNotificationCategory {
         let saveAction = UNNotificationAction(
             identifier: save,
@@ -48,6 +53,7 @@ enum NotificationActionIdentifier {
         )
     }
 
+    /// Registers the story banner category; does nothing outside an app bundle, such as in a test runner.
     static func registerCategories(center: UNUserNotificationCenter = .current()) {
         guard Bundle.main.bundleIdentifier != nil else { return }
         center.setNotificationCategories([makeCategory()])
@@ -59,9 +65,12 @@ enum NotificationActionIdentifier {
 /// a later refresh that brings the first stories, or turning notifications on.
 @MainActor
 final class NotificationPermissionRequest {
+    /// True once permission was asked for this launch.
     private(set) var hasRequested = false
     private var subscription: AnyCancellable?
 
+    /// Watches refreshes and the settings and calls `request` once, when a refresh has completed with stories, the
+    /// first-launch sheet is closed and notifications are on.
     init(feedManager: FeedManager, settings: AppSettings, request: @escaping () -> Void) {
         // Stories are checked when a refresh completes, never while one is still publishing its first stories.
         let refreshedWithStories = feedManager.$lastRefreshCompletedAt
@@ -85,6 +94,8 @@ final class NotificationPermissionRequest {
 /// to `ArticleStore`, `ReadManager`, and `SavedStoriesManager` (#560).
 @MainActor
 enum NotificationActionRouter {
+    /// Performs a banner action on the story its `userInfo` names by id, or by link when it carries no id. Save and
+    /// Mark as Read wait for the store to start; Open and a banner click bring the app forward and open the story.
     static func route(
         actionIdentifier: String,
         userInfo: [AnyHashable: Any],

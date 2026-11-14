@@ -21,19 +21,25 @@ import os
 /// Detached actor performing on-device passage segmentation, vector embedding,
 /// and perspective contrast alignment between paired articles (#717).
 public actor DualReaderAlignmentService {
+    /// Cosine similarity at or above which two passages are `consensus`.
     public static let consensusThreshold: Float = 0.82
+    /// Cosine similarity at or above which a passage still has a counterpart, as `divergence`; below it the passage is
+    /// a `uniqueLead`.
     public static let divergenceThreshold: Float = 0.40
+    /// The embedding size, which the lexical fallback vector matches.
     public static let vectorDimension = 384
     /// The most passages one report contributes: the title and the opening of the story. A live blog of hundreds of
     /// paragraphs would otherwise cost hundreds of embeddings for a comparison nobody reads to the end.
     public static let maximumPassages = 40
 
+    /// One publisher's article as the comparison reads it.
     public struct ArticleInput: Sendable {
         public let id: String
         public let title: String
         public let content: String
         public let publisher: String
 
+        /// Creates an input from an article's id, title, body text and publisher name.
         public init(
             id: String,
             title: String,
@@ -53,10 +59,12 @@ public actor DualReaderAlignmentService {
     /// One passage's neural vector, or nil when the embedder is not available; a test passes its own.
     private let embed: @Sendable (String) async -> [Float]?
 
+    /// Creates a service that embeds passages with `SentenceEmbedder.shared`.
     public init() {
         embed = { await SentenceEmbedder.shared.embed($0) }
     }
 
+    /// Creates a service with an injected embedding; nil from it switches the comparison to lexical vectors.
     init(embed: @escaping @Sendable (String) async -> [Float]?) {
         self.embed = embed
     }

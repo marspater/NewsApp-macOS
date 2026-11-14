@@ -132,6 +132,8 @@ extension TodayEditionAssigner {
 
     // MARK: - The Deep Read (Stored Reading Time + Content-Type Classification)
 
+    /// Minutes to read the longest stored text of any visible report (reader text, full content or description) or of
+    /// the preloaded texts, at `wordsPerMinute`; 0 when the speed is not positive.
     static func storedReadingTimeMinutes(
         for entry: FeedEntry,
         preloadedTexts: [String] = [],
@@ -289,6 +291,7 @@ extension TodayEditionAssigner {
 
     // MARK: - Headline Tokens
 
+    /// Folded words of at least three letters, without common function and news words.
     static func substantiveHeadlineTokens(_ text: String) -> Set<String> {
         let stopWords: Set<String> = [
             "the", "and", "for", "that", "with", "from", "this", "are", "was", "were",

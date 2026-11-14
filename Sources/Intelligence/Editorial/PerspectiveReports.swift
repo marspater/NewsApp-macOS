@@ -22,10 +22,14 @@ struct PerspectiveReport: Identifiable, Hashable, Sendable {
     let id: String
     let publisher: String
     let title: String
+    /// The article's full text, or its description when no full text is stored.
     let text: String
+    /// Whitespace-separated words in `text`; `PerspectiveReports.candidates(from:)` makes no report below
+    /// `minimumWords`.
     let wordCount: Int
 }
 
+/// Picks the reports of an event that the dual reader can compare.
 enum PerspectiveReports {
     /// Fewer words than this compare headlines, not reporting.
     static let minimumWords = 60

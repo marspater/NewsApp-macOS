@@ -18,8 +18,11 @@ import Foundation
 
 /// The map's data for one reading (#718): only places its own headlines name, with the tension those headlines carry.
 struct WorldTensionHotspots: Equatable, Sendable {
+    /// Regions that group the pins within reach of their anchor.
     let regions: [HotspotRegion]
+    /// One pin per named place whose headlines carry a tension cue.
     let pins: [HotspotClusterPin]
+    /// True when there is no pin to draw.
     var isEmpty: Bool { pins.isEmpty }
 
     private struct Place {

@@ -20,10 +20,15 @@ import NaturalLanguage
 /// Manages context token budgeting for on-device event overview generation.
 /// Differentiates tokens from raw character counts, reserving budget for instructions, schema, and response.
 public struct OverviewTokenBudget: Sendable, Equatable {
+    /// The model's whole context in tokens.
     public let totalBudget: Int
+    /// Tokens reserved for the prompt's instructions.
     public let instructionTokens: Int
+    /// Tokens reserved for the answer format description.
     public let schemaTokens: Int
+    /// Tokens reserved for the model's answer.
     public let reservedResponseTokens: Int
+    /// Tokens held back against estimation error.
     public let safetyMarginTokens: Int
 
     /// Tokens remaining for input evidence passages after reserving for prompt template, schema, and response.
@@ -31,6 +36,7 @@ public struct OverviewTokenBudget: Sendable, Equatable {
         max(0, totalBudget - instructionTokens - schemaTokens - reservedResponseTokens - safetyMarginTokens)
     }
 
+    /// Creates a budget; the defaults fit a 4,096-token context.
     public init(
         totalBudget: Int = 4096,
         instructionTokens: Int = 350,
@@ -199,10 +205,16 @@ struct OverviewRepresentativeSelector: Sendable {
 
 /// Result of passage selection across representative articles.
 struct OverviewPassageSelection: Sendable, Equatable {
+    /// The articles chosen to stand for the event.
     let representatives: [FeedArticle]
+    /// The selected passages, possibly trimmed to their key sentences.
     let passages: [EvidencePassage]
+    /// Estimated tokens of `passages`.
     let totalEstimatedTokens: Int
+    /// True when the first selection exceeded the budget and was pruned.
     let overflowHandled: Bool
+    /// True when no passage was found or even the tightest selection exceeds the budget; the deterministic overview
+    /// should stand.
     let isFallbackRecommended: Bool
 
 }
@@ -212,10 +224,13 @@ struct OverviewPassageSelection: Sendable, Equatable {
 struct OverviewPassageSelector: Sendable {
     private let representativeSelector: OverviewRepresentativeSelector
 
+    /// Creates a selector that picks representatives with `representativeSelector`.
     init(representativeSelector: OverviewRepresentativeSelector = OverviewRepresentativeSelector()) {
         self.representativeSelector = representativeSelector
     }
 
+    /// Picks up to two ranked passages per representative and prunes to fit the budget: first one passage each, then
+    /// those trimmed to about 180 characters of key sentences, then the first two.
     func selectPassages(
         from articles: [FeedArticle],
         budget: OverviewTokenBudget = OverviewTokenBudget()

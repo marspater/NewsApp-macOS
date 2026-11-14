@@ -26,6 +26,8 @@ import os
     extension GenerationOptions {
         #if !canImport(FoundationModels, _version: "2.0")
             // The stable SDK used by CodeQL (Xcode 26.3) requires `sampling:`; newer SDKs provide `samplingMode:`.
+            /// Maps the newer SDK's `samplingMode:` label onto the stable SDK's `sampling:`, so one call site builds
+            /// with both.
             init(
                 samplingMode: SamplingMode,
                 temperature: Double? = nil,
@@ -43,6 +45,7 @@ import os
 
 // MARK: - Fixed News Category Taxonomy (12 Standard Categories)
 
+/// The twelve fixed story categories; the raw value is the stored and displayed name.
 public enum NewsCategory: String, CaseIterable, Sendable, Codable {
     case technology = "Technology"
     case science = "Science"
@@ -57,6 +60,10 @@ public enum NewsCategory: String, CaseIterable, Sendable, Codable {
     case fashion = "Fashion"
     case lifestyle = "Lifestyle"
 
+    /// The category a publisher hint or model answer names, read from its first line only.
+    ///
+    /// Tries an exact case-insensitive name first, then whole-word cues and synonyms, so "Wildlife" does not match
+    /// Lifestyle. Nil for an empty line or no match.
     public static func match(from string: String) -> NewsCategory? {
         let firstLine = string.components(separatedBy: .newlines).first ?? string
         let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -153,6 +160,11 @@ public enum NewsCategory: String, CaseIterable, Sendable, Codable {
 
 /// One hermetic, stateless plain-text request. Fresh sessions keep earlier publisher text out of later judgments.
 public struct NewsTextModel: Sendable {
+    /// Sends a prompt with a maximum response length in tokens and returns the answer text.
+    ///
+    /// Throws `Rejected` when the answer would repeat for the same input, `TemporarilyUnavailable` when a later request
+    /// may succeed, `URLError(.resourceUnavailable)` when this Mac cannot run the model, and `CancellationError` when
+    /// cancelled.
     let respond: @Sendable (String, Int) async throws -> String
 
     /// Apple Intelligence is switched off, its model is still downloading, or the model is busy or rate limited, so a
@@ -164,10 +176,12 @@ public struct NewsTextModel: Sendable {
     /// larger than the context window, an unsupported language, or undecodable output). Greedy sampling would answer
     /// the same text the same way, so the deterministic result is final. Carries the reason only, never publisher text.
     public struct Rejected: Error, Equatable, Sendable {
+        /// Why the model declined; never contains publisher text.
         public let reason: RejectionReason
         public init(reason: RejectionReason) { self.reason = reason }
     }
 
+    /// The failure classes that repeat for the same input under greedy sampling.
     public enum RejectionReason: String, Sendable {
         case guardrail, refusal, contextWindow, unsupportedLanguage, decoding, unsupportedGuide, unsupportedCapability,
             unsupportedTranscript
@@ -220,6 +234,7 @@ public struct NewsTextModel: Sendable {
                 }
             }
 
+            /// The macOS 27 counterpart of `failure(_:)` for `GenerationError`: rate limits and timeouts are transient.
             @available(macOS 27.0, *)
             static func failure(_ error: LanguageModelError) -> Error {
                 let transient: Bool
@@ -272,7 +287,13 @@ public struct NewsTextModel: Sendable {
     /// the macOS build identifies it; an update that keeps the model only causes one extra regeneration.
     public static var generation: String { ProcessInfo.processInfo.operatingSystemVersionString }
 
+    /// A model that always throws `URLError(.resourceUnavailable)`; each caller decides whether its fallback is final.
     public static let unavailable = NewsTextModel { _, _ in throw URLError(.resourceUnavailable) }
+    /// The system language model with permissive content-transformation guardrails and greedy sampling, a fresh session
+    /// per request.
+    ///
+    /// Throws `TemporarilyUnavailable` while the model is unavailable for a reason other than device eligibility, and
+    /// `URLError(.resourceUnavailable)` on an ineligible Mac or a build without FoundationModels.
     public static let onDevice = NewsTextModel { prompt, tokens in
         try Task.checkCancellation()
         #if canImport(FoundationModels)
@@ -307,6 +328,10 @@ public struct NewsTextModel: Sendable {
 
 /// Strict text contracts keep malformed model output on the existing deterministic fallback path.
 enum ArticleTextAnswer {
+    /// Parses `SUMMARY|` and `POINT|` lines into one summary and two to five key points.
+    ///
+    /// Returns nil for any other line, a second summary, an empty or over-1,500-character field, or a point count
+    /// outside two to five.
     static func analysis(_ answer: String) -> (summary: String, keyPoints: [String])? {
         var summary: String?
         var points: [String] = []
@@ -330,6 +355,7 @@ enum ArticleTextAnswer {
 
 // MARK: - Intelligence Domain Models
 
+/// The kind of named entity the tagger found.
 public enum EntityType: String, Sendable, Codable, Hashable {
     case person
     case organization
@@ -346,6 +372,7 @@ public enum EntityType: String, Sendable, Codable, Hashable {
         }
     }
 
+    /// The singular label shown for the type; `unknown` reads "Entity".
     public var displayName: String {
         switch self {
         case .person: return "Person"
@@ -356,9 +383,11 @@ public enum EntityType: String, Sendable, Codable, Hashable {
     }
 }
 
+/// A named entity found in an article's text.
 public struct EntityResult: Sendable, Equatable, Codable, Hashable {
     public let name: String
     public let type: EntityType
+    /// The extractor's confidence from 0 to 1; `readerTags(from:)` drops entities below 0.5.
     public let confidence: Double
 
     public init(name: String, type: EntityType, confidence: Double = 1.0) {
@@ -436,6 +465,7 @@ extension EntityResult {
     }
 }
 
+/// The tone of an article's text as the sentiment tagger scores it.
 public struct SentimentResult: Sendable, Equatable, Codable, Hashable {
     public let score: Double  // -1.0 (very negative) to +1.0 (very positive)
     public let confidence: Double  // 0.0 to 1.0
@@ -448,7 +478,9 @@ public struct SentimentResult: Sendable, Equatable, Codable, Hashable {
     }
 }
 
+/// A story's category with the evidence that chose it.
 public struct TopicResult: Sendable, Equatable, Codable {
+    /// The raw value of a `NewsCategory`.
     public let category: String
     public let confidence: Double  // 0.0 to 1.0
     public let evidence: [String]  // Extracted keywords / entities supporting the category
@@ -460,9 +492,11 @@ public struct TopicResult: Sendable, Equatable, Codable {
     }
 }
 
+/// An extractive summary and the number of sentences it took.
 public struct SummaryResult: Sendable, Equatable, Codable {
     public let text: String
     public let sentencesUsed: Int
+    /// A fixed confidence: 0.85 for a scored summary, 0.5 when the text had no usable sentence.
     public let confidence: Double
 
     public init(text: String, sentencesUsed: Int, confidence: Double) {
@@ -474,14 +508,22 @@ public struct SummaryResult: Sendable, Equatable, Codable {
 
 /// Structured article intelligence result persisted in SQLite and displayed in the reader UI.
 public struct ArticleAnalysis: Sendable, Equatable, Codable {
+    /// One paragraph summarizing the article.
     public let summary: String
+    /// Key points: two to five from the model, up to four extracted sentences otherwise.
     public let keyPoints: [String]
+    /// Reader tags, already reduced by `EntityResult.readerTags(from:)`.
     public let entities: [EntityResult]
+    /// The story's category as the caller passed it; the analyzer does not classify.
     public let category: String?
     public let sentiment: SentimentResult?
+    /// `apple.foundation-model` for a model summary, `apple.natural-language.fallback` for the extractive one.
     public let modelIdentifier: String
+    /// The analysis format version; 0 marks a provisional extractive result made after a failed model request, which
+    /// the reader does not reuse.
     public let analysisVersion: Int
 
+    /// Creates an analysis; `entities` are reduced to reader tags with `EntityResult.readerTags(from:)`.
     public init(
         summary: String,
         keyPoints: [String] = [],
@@ -503,6 +545,7 @@ public struct ArticleAnalysis: Sendable, Equatable, Codable {
 
 // MARK: - Typed AI Error Domain
 
+/// Errors of the article analysis domain; `ArticleAnalyzer.analyze` throws only `cancelled`.
 public enum AIAnalysisError: Error, Sendable, Equatable {
     case unavailable(String)
     case modelNotReady
@@ -517,31 +560,39 @@ public enum AIAnalysisError: Error, Sendable, Equatable {
 
 // MARK: - Capability Protocols (Model-Agnostic)
 
+/// Scores the tone of a text.
 public protocol SentimentAnalyzing: Sendable {
     func analyzeSentiment(for text: String) async -> SentimentResult
 }
 
+/// Finds named people, organizations and places in a text.
 public protocol EntityExtracting: Sendable {
     func extractEntities(from text: String) async -> [EntityResult]
 }
 
+/// Assigns a story to one of the fixed categories.
 public protocol TopicClassifying: Sendable {
+    /// The category for the story, or nil when no category scores high enough.
     func classifyTopic(title: String, description: String, text: String?, rssCategory: String?) async -> TopicResult?
 }
 
+/// Produces a short summary of an article.
 public protocol ArticleSummarizing: Sendable {
     func summarize(title: String, content: String) async -> SummaryResult
 }
 
+/// Removes navigation and boilerplate paragraphs from extracted article text.
 public protocol ContentCleaning: Sendable {
     func cleanContent(_ rawText: String) -> String
 }
 
 // MARK: - NaturalLanguage & Deterministic Implementations (M1/M2 Fallback)
 
+/// Scores sentiment with the NaturalLanguage sentiment tagger, on-device and without a model request.
 public final class NaturalLanguageSentimentAnalyzer: SentimentAnalyzing {
     public init() {}
 
+    /// Scores the first paragraph of `text`: above 0.25 is "Positive", below -0.25 "Critical", otherwise "Neutral".
     public func analyzeSentiment(for text: String) async -> SentimentResult {
         let tagger = NLTagger(tagSchemes: [.sentimentScore])
         tagger.string = text
@@ -562,9 +613,11 @@ public final class NaturalLanguageSentimentAnalyzer: SentimentAnalyzing {
     }
 }
 
+/// Finds people, organizations and places with the NaturalLanguage name tagger.
 public final class NaturalLanguageEntityExtractor: EntityExtracting {
     public init() {}
 
+    /// Tagged names longer than two characters, each once regardless of case, in text order, at confidence 0.9.
     public func extractEntities(from text: String) async -> [EntityResult] {
         let signpostState = NewsSignposts.begin(
             NewsSignposts.intelligence, name: "AIEntityExtraction", metadata: "len=\(text.count)")
@@ -602,9 +655,11 @@ public final class NaturalLanguageEntityExtractor: EntityExtracting {
     }
 }
 
+/// The deterministic topic classifier: a publisher category hint, then whole-word keyword scoring.
 public final class NaturalLanguageTopicClassifier: TopicClassifying {
     public init() {}
 
+    /// Keyword cues per category that `classifyContent(title:description:text:)` scores.
     public static let taxonomy: [(category: NewsCategory, keywords: [String])] = [
         (
             .technology,
@@ -741,6 +796,8 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
         "indonesia", "afghanistan", "nepal",
     ]
 
+    /// Returns the category a non-empty `rssCategory` names at confidence 0.95, else
+    /// `classifyContent(title:description:text:)`.
     public func classifyTopic(title: String, description: String, text: String?, rssCategory: String?) async
         -> TopicResult?
     {
@@ -767,6 +824,11 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
         "executive order", "midterm", "midterms", "capitol",
     ]
 
+    /// Scores whole-word cues in the title, description and the first 2,000 characters of the body.
+    ///
+    /// A Politics headline that names a foreign place or leader becomes World unless it carries a
+    /// `domesticPoliticsCues` phrase. Returns nil when the best category scores below 2; confidence rises with the
+    /// score up to 0.95.
     static func classifyContent(title: String, description: String, text: String?) -> TopicResult? {
         // Score whole words; short cues such as AI must not match Dubai, said or aircraft.
         func padded(_ value: String) -> String {
@@ -836,9 +898,14 @@ public final class NaturalLanguageTopicClassifier: TopicClassifying {
     }
 }
 
+/// Summarizes and picks key points by scoring sentences on position and overlap with the headline.
 public final class ExtractiveArticleSummarizer: ArticleSummarizing {
     public init() {}
 
+    /// The two best-scoring sentences of 31 to 349 characters in text order.
+    ///
+    /// Early sentences, headline words and lengths of 80 to 220 characters score higher. Empty content returns the
+    /// title, and content without a usable sentence its first 200 characters, both at confidence 0.5.
     public func summarize(title: String, content: String) async -> SummaryResult {
         let signpostState = NewsSignposts.begin(
             NewsSignposts.intelligence, name: "AISummarization", metadata: "len=\(content.count)")
@@ -925,6 +992,8 @@ public final class ExtractiveArticleSummarizer: ArticleSummarizing {
     }
 }
 
+/// Keeps the prose paragraphs of extracted text, dropping short, shouting, symbol-laden and boilerplate ones and
+/// repeats of an earlier paragraph's opening.
 public final class ProseContentCleaner: ContentCleaning {
     public init() {}
 
@@ -1014,10 +1083,12 @@ public final class ProseContentCleaner: ContentCleaning {
 /// whole-word classifier. No language model is involved; a Foundation Models stage existed but no caller reached it
 /// and it was removed (#546).
 public final class ArticleClassifier: Sendable {
+    /// The classifier feed ingestion uses.
     public static let shared = ArticleClassifier()
 
     private let fallbackClassifier: NaturalLanguageTopicClassifier
 
+    /// Creates a classifier that falls back to `fallbackClassifier` when the publisher gives no matching category hint.
     public init(fallbackClassifier: NaturalLanguageTopicClassifier = NaturalLanguageTopicClassifier()) {
         self.fallbackClassifier = fallbackClassifier
     }
@@ -1057,6 +1128,7 @@ public final class ArticleClassifier: Sendable {
 /// Dedicated semantic analyzer invoked lazily and exclusively when the user opens an article.
 /// Fully cancellable when the user navigates away.
 public final class ArticleAnalyzer: Sendable {
+    /// The analyzer the reader uses, backed by the on-device model.
     public static let shared = ArticleAnalyzer()
     private static let logger = Logger(subsystem: "com.marspater.news", category: "ArticleAnalyzer")
 
@@ -1066,6 +1138,7 @@ public final class ArticleAnalyzer: Sendable {
     private let contentCleaner: ProseContentCleaner
     private let textModel: NewsTextModel
 
+    /// Creates an analyzer from its extractive fallbacks and a text model; tests inject `NewsTextModel` stand-ins.
     public init(
         fallbackSummarizer: ExtractiveArticleSummarizer = ExtractiveArticleSummarizer(),
         fallbackExtractor: NaturalLanguageEntityExtractor = NaturalLanguageEntityExtractor(),
@@ -1184,6 +1257,8 @@ public final class ArticleAnalyzer: Sendable {
 
 // MARK: - Article Content Redactor & Formatter
 
+/// Strips publisher boilerplate (read-more links, syndication notes, newsletter calls) from article text and splits it
+/// into reader paragraphs.
 public enum ArticleContentRedactor {
     private static let boilerplatePatterns: [String] = [
         // Fused sentence ending, e.g. 'last year.Read full article' or 'last year. Read full article Comments'

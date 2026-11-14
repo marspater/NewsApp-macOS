@@ -27,22 +27,31 @@ struct EventFeatures: Hashable, Sendable, Codable {
     /// Dominant language when the recognizer is reasonably sure; nil otherwise.
     var language: String?
     // Who
+    /// Normalized person names.
     var people: Set<String> = []
+    /// Normalized organization names.
     var organizations: Set<String> = []
     // Where
+    /// Places, a country canonicalized to its region code (`@US`).
     var places: Set<String> = []
     /// Capitalized words inside a sentence that the tagger did not type: usually names it missed.
     var names: Set<String> = []
     // What
+    /// Distinctive words of the title and description opening, the action terms the `what` similarity compares.
     var keywords: Set<String> = []
     // When, plus explicit facts that tell two similar reports apart
+    /// The article's publication date; `DateParser.unknownDate` rules out every pair.
     var date: Date
     /// Headline figures that tell incidents apart (a magnitude, a count of things). Casualty tolls are kept apart in
     /// `tollNumbers`: they change as reports update, so they never distinguish two reports of one incident.
     var titleNumbers: Set<String> = []
+    /// Headline casualty tolls, which may change between reports of one incident and never tell two reports apart.
     var tollNumbers: Set<String> = []
+    /// Reporting periods named in the text: `q1` to `q4`, `h1` and `h2`.
     var periods: Set<String> = []
+    /// Four-digit years from 1900 to 2100 named in the text.
     var years: Set<String> = []
+    /// Weekday names in the text, lowercased.
     var weekdays: Set<String> = []
     /// Non-place headline terms from the primary clause when the headline has a trailing/leading background clause.
     var primaryTitleTerms: Set<String> = []
@@ -72,8 +81,10 @@ struct EventFeatures: Hashable, Sendable, Codable {
     /// Places (countries as `@` codes, and cities or regions) and people named in the headline itself (#737). Headline
     /// places that differ separate two reports even when each description mentions the other's place.
     var titlePlaces: Set<String> = []
+    /// The `people` that appear in the headline.
     var titlePeople: Set<String> = []
 
+    /// Every name the article carries: people, organizations, places and untyped names.
     var anchors: Set<String> { people.union(organizations).union(places).union(names) }
     /// Places that name a country, canonicalized to a region code (`@US`).
     var countries: Set<String> { places.filter { $0.hasPrefix("@") } }
@@ -166,6 +177,7 @@ enum EventPlaces {
 }
 
 extension EventFeatures {
+    /// The plain description characters read after the headline.
     static let descriptionPrefix = 600
 
     private static let weekdayNames: Set<String> = [
@@ -261,6 +273,8 @@ extension EventFeatures {
                 #"\b(?:following|in\s+(?:the\s+)?wake\s+of|in\s+response\s+to|(?:hours|days|weeks|months|moments|shortly|soon)\s+after|after|over|amid)\b"#,
             options: [.caseInsensitive])) ?? NSRegularExpression()
 
+    /// Case-, accent- and width-folded and lowercased, without a trailing possessive or surrounding punctuation and
+    /// symbols.
     static func normalized(_ value: String) -> String {
         var text = value.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
             .lowercased()
@@ -661,23 +675,37 @@ extension EventFeatures {
 /// missed link over a wrong merge; they are to be tuned against the labeled corpus (#102), not
 /// claimed as measured.
 struct EventMatchPolicy: Sendable, Equatable {
+    /// Reports further apart than this are never one event.
     var maximumTimeGap: TimeInterval = 36 * 3600
+    /// Beyond this gap a rule match needs `strictWhat` and three pieces of shared evidence.
     var strictTimeGap: TimeInterval = 12 * 3600
+    /// Up to this gap the time part of the score is 1; it then falls linearly to 0 at `maximumTimeGap`.
     var fullTimeCredit: TimeInterval = 6 * 3600
+    /// The keyword similarity a rule match needs.
     var minimumWhat = 0.2
+    /// The keyword similarity a rule match needs beyond `strictTimeGap`.
     var strictWhat = 0.35
+    /// Shared names plus shared evidence a rule match needs.
     var minimumSharedTerms = 3
+    /// The pair score a rule match needs: 0.4 keyword, 0.4 name and 0.2 time similarity.
     var matchScore = 0.55
+    /// The pair score at which a pair with a shared specific name counts toward the two-thirds rule.
     var compatibilityScore = 0.35
+    /// The share of an event's members a joining report must be compatible with.
     var compatibleShare = 2.0 / 3.0
+    /// The pair score from which a pair with a shared name and evidence is borderline and may ask the pair model.
     var borderlineScore = 0.3
+    /// The mean pair score a report needs to join an event.
     var eventScore = 0.45
+    /// An event with this many members takes no more.
     var maximumEventSize = 100
     /// Semantic embedding thresholds (#127, #307, #509). The rescue cutoff was chosen on the tune split on
     /// 24 October 2026: 0.70 links five more labeled pairs than 0.82 with no false pair, 0.65 adds three false pairs;
     /// the holdout confirmed it once (precision 1.000, recall 0.447 → 0.579).
     var semanticMatchThreshold: Double = 0.70
+    /// An embedding cosine below this rules the pair out as `semanticDivergence`.
     var semanticVetoThreshold: Double = 0.55
+    /// An embedding cosine at or above this, with a shared specific name, makes a pair compatible and borderline.
     var semanticFragmentThreshold: Double = 0.70
     /// A borderline pair the pair model (#525) scores at or above this is one event, standing in for a shared
     /// specific anchor. The highest cutoff that keeps the best tune recall without a false pair (24 October 2026:
@@ -689,6 +717,7 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// A pair sharing no anchor may still go to the pair model when its cosine reaches this and the reports are at most
     /// `anchorlessModelGap` apart (#582). Infinity turns it off.
     var anchorlessModelCosine: Double = .infinity
+    /// The largest time gap at which a pair without a shared name may still ask the pair model.
     var anchorlessModelGap: TimeInterval = 24 * 3600
     /// When true, a pair counts as compatible for admission only when it is a match (#582): a borderline pair with a
     /// shared name cannot carry an unrelated report into an event through the two-thirds rule.
@@ -721,11 +750,14 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// share of the cross-pairs exceeds `vetoShare`; a tolerated vetoing pair still counts against the two-thirds rule.
     /// Other conflicts stay absolute. Nil: every cross-pair must be conflict-free (default).
     var vetoMinimum: Int?
+    /// See `vetoMinimum`.
     var vetoShare: Double?
+    /// True when `vetoMinimum` or `vetoShare` is set.
     var vetoThreshold: Bool { vetoMinimum != nil || vetoShare != nil }
     /// Borderline floor for the two-thirds rule (#737, evaluation): a pair the pair model scored below this, and that
     /// is no match, counts as compatible only when it shares at least `borderlineNames` specific names. Nil turns it off.
     var borderlineFloor: Double?
+    /// Specific names a low-scored borderline pair needs under `borderlineFloor`.
     var borderlineNames = 3
     /// Newsletter strip for the pair-model input (#737, evaluation): a title's trailing ` | <series>` suffix and the
     /// body's sign-up line and "Plus …" teaser crush the pair model's score of a newsletter edition
@@ -735,6 +767,7 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// through its best matched pair alone, its other items raising no veto, and it does not count toward the two-thirds
     /// rule of other reports. Off: an edition is a report like any other.
     var editionAdmission = false
+    /// The shipped thresholds.
     static let standard = EventMatchPolicy()
 }
 
@@ -744,11 +777,15 @@ struct EventMatchPolicy: Sendable, Equatable {
 /// It moves a pair's cutoff by at most `maximumShift`, down where the reader's verdicts call pairs like it one event and
 /// up where they do not. Dormant below `minimumVerdicts`: without it the cutoff is the policy's, unchanged.
 struct PairCalibration: Sendable, Equatable {
+    /// One reader verdict with its pair's scaled `features(pairModel:cosine:sharedSpecific:gapHours:sameAct:)`.
     struct Row: Sendable, Equatable {
         var features: [Double]
+        /// True for "Same Event", false for "Not the Same Event".
         var same: Bool
     }
+    /// Verdicts the fit needs before calibration moves any cutoff.
     static let minimumVerdicts = 50
+    /// The most the cutoff moves in either direction.
     static let maximumShift = 0.05
     /// Bias first, then one weight per feature.
     let weights: [Double]
@@ -802,21 +839,33 @@ struct PairCalibration: Sendable, Equatable {
 
 /// Facts that rule a pair out regardless of how similar the rest of the text is.
 enum EventConflict: String, Sendable, Equatable {
+    /// The fact that ruled the pair out; `semanticDivergence` is an embedding cosine under the veto threshold.
     case language, unknownDate, timeGap, period, year, weekday, calendarDay, edition, namedStorm, differentAct,
         titleNumbers, places, headlinePlaces, excluded, semanticDivergence
 }
 
+/// How two reports compare: the score, the shared evidence and the decisions `EventMatcher.assess` derived from them.
 struct EventPairAssessment: Sendable, Equatable {
+    /// The fact that rules the pair out; nil when none does.
     var conflict: EventConflict?
+    /// No match and no conflict, but close enough for the pair model to decide.
     var isBorderline = false
+    /// The weighted keyword, name and time similarity, raised to the embedding cosine when that is higher.
     var score: Double
+    /// Keyword similarity: the cosine of the shared keyword count.
     var what: Double
+    /// Name overlap of the two reports.
     var entity: Double
+    /// Names in common, including one report's specific names among the other's keywords.
     var sharedAnchors: Int
+    /// Specific names (not countries) in common, counted the same way.
     var sharedSpecificAnchors: Int
     var sharedKeywords: Int
+    /// A rule match or a semantic rescue: the pair is one event.
     var isMatch: Bool
+    /// The pair counts toward the two-thirds rule of event admission.
     var isCompatible: Bool
+    /// The embedding cosine; nil when it was not given or a report is not English or of unknown language.
     var embeddingCosine: Double?
     /// The pair model judged this borderline pair one event (#525).
     var modelConfirmed = false
@@ -829,9 +878,11 @@ struct EventPairAssessment: Sendable, Equatable {
     var masksAbsoluteConflict = false
     /// Under `editionAdmission` (#737): the joining report, or the event member it is assessed against, is an edition.
     var rowIsEdition = false
+    /// Under `editionAdmission`: the event member is a newsletter edition.
     var memberIsEdition = false
 }
 
+/// Decides whether two reports describe one event and whether a report may join an event.
 enum EventMatcher {
     /// Bump when matching changes, a retrained pair model included; recent articles and active memberships are
     /// revalidated. Unchanged archived memberships remain intact.
@@ -1107,6 +1158,7 @@ enum EventMatcher {
         return pair
     }
 
+    /// Assesses the article against each member and returns `eventScore(pairs:policy:)`; nil when `excluded`.
     static func eventScore(
         for article: EventFeatures, members: [EventFeatures], excluded: Bool = false,
         policy: EventMatchPolicy = .standard
@@ -1128,6 +1180,11 @@ enum EventMatcher {
         return reports.isEmpty ? pairs : reports
     }
 
+    /// The mean pair score when the report may join the event; nil otherwise.
+    ///
+    /// Admission needs fewer than `maximumEventSize` pairs, no blocking conflict, a shared specific name or a model
+    /// confirmation in every pair, at least one match, compatibility with `compatibleShare` of the pairs and a mean
+    /// score of at least `eventScore`.
     static func eventScore(pairs: [EventPairAssessment], policy: EventMatchPolicy = .standard) -> Double? {
         guard pairs.count < policy.maximumEventSize else { return nil }
         let pairs = admissionPairs(pairs, policy: policy)

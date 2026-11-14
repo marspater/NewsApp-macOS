@@ -19,10 +19,14 @@ import os
 
 /// Priority for overview generation requests.
 enum OverviewRequestPriority: Sendable, Comparable {
+    /// An event on screen; runs at `EnrichmentPriority.high`.
     case visibleEvent
+    /// An overview the reader opened; runs at `EnrichmentPriority.interactive`.
     case onDemand
+    /// Warm-up work; runs at `EnrichmentPriority.background`.
     case background
 
+    /// The queue priority the request runs at.
     var enrichmentPriority: EnrichmentPriority {
         switch self {
         case .onDemand:
@@ -39,6 +43,7 @@ enum OverviewRequestPriority: Sendable, Comparable {
 /// caching, cooperative cancellation, staleness checks, and version supersession.
 /// Reuses the existing `EnrichmentQueue` to respect bounded concurrency and system resources.
 actor OverviewGenerationCoordinator {
+    /// The coordinator the app uses, fetching publisher pages through `ContentExtractionPipeline.shared`.
     static let shared = OverviewGenerationCoordinator(extractText: { link in
         await ContentExtractionPipeline.shared.extractArticleWithIdentity(from: link).outcome
     })
@@ -70,7 +75,9 @@ actor OverviewGenerationCoordinator {
     nonisolated let extractText: (@Sendable (_ link: String) async -> ExtractionOutcome)?
     /// Each page fetch ends by this deadline, counted from when it starts, so a slow publisher cannot hold up an overview.
     nonisolated let extractionDeadline: Duration
+    /// The most representatives without publisher text one request fetches pages for.
     static let maxEvidenceFetches = 4
+    /// Page fetches that run at once; further fetches wait for a slot.
     static let maxConcurrentExtractions = 2
     /// Running page fetches by article ID; overlapping requests join them instead of fetching again.
     private var extractionTasks: [String: Task<Void, Never>] = [:]
@@ -80,6 +87,7 @@ actor OverviewGenerationCoordinator {
     // ponytail: grows with articles seen in one session; prune by age if sessions get long.
     private var failedExtractions: Set<String> = []
     private var activeExtractions = 0
+    /// The most stale overviews regenerated for one Briefing edition.
     static let maxStaleRegenerationsPerEdition = 8
     /// The events chosen for regeneration in the Briefing edition on screen (#1299). Keyed by the edition's stories,
     /// which a stored overview does not change, so the reload that follows each result cannot raise the bound.
@@ -92,18 +100,25 @@ actor OverviewGenerationCoordinator {
 
     /// Work in flight and this session's failures, for the diagnostics export (#1006).
     struct Counts: Sendable, Equatable {
+        /// Generations running now.
         var inFlight = 0
+        /// Page fetches running now.
         var extractions = 0
+        /// Page fetches that failed or timed out this session.
         var failedExtractions = 0
+        /// Overviews held in the memory cache.
         var cached = 0
     }
 
+    /// The current work and failure counts.
     func counts() -> Counts {
         Counts(
             inFlight: inFlightTasks.count, extractions: activeExtractions, failedExtractions: failedExtractions.count,
             cached: memoryCache.count)
     }
 
+    /// Creates a coordinator; nil `extractText` fetches no publisher pages, and nil `allowsEnergy` uses
+    /// `IntelligencePolicy.allowsEnergy(_:)`.
     init(
         store: ArticleStore? = nil, queue: EnrichmentQueue = .shared,
         allowsEnergy: (@Sendable () async -> Bool)? = nil,
@@ -274,6 +289,7 @@ actor OverviewGenerationCoordinator {
     /// Callers waiting on a shared generation right now.
     private var waitingCallers = 0
 
+    /// Callers waiting on a shared generation right now.
     func waitingCallerCount() -> Int { waitingCallers }
 
     /// Waits for a shared generation as one of its callers. A cancelled caller gets nil, also when the generation
@@ -723,6 +739,8 @@ actor OverviewGenerationCoordinator {
         latestRequestedInputs[eventID] = (membershipVersion, inputTextHash)
     }
 
+    /// Forgets cached overviews, requested inputs, this session's failed fetches and regenerations, and the stale
+    /// edition's choices.
     func clearCache() {
         memoryCache.removeAll()
         memoryCacheOrder.removeAll()

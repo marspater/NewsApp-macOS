@@ -69,10 +69,14 @@ struct SemanticVersion: Comparable, Sendable {
 
 /// Codable release payload: production decodes it and test fixtures encode deterministic responses.
 struct GitHubReleasePayload: Codable, Sendable {
+    /// The release tag, such as `v2.0.0`.
     let tagName: String
     let name: String?
+    /// The release page, accepted only when it passes `UpdateChecker.isValidReleaseURL(_:)`.
     let htmlUrl: String
+    /// The release notes.
     let body: String?
+    /// The publication time as GitHub writes it.
     let publishedAt: String?
 
     enum CodingKeys: String, CodingKey {
@@ -95,12 +99,20 @@ struct GitHubReleasePayload: Codable, Sendable {
 @Observable final class UpdateChecker {
     static let shared = UpdateChecker(defaults: .standard)
 
+    /// True while a check runs.
     var isChecking: Bool = false
+    /// True when the latest release is newer than the running version.
     var updateAvailable: Bool = false
+    /// The newer release's tag; nil when none was found.
     var latestVersionString: String?
+    /// The newer release's notes.
     var releaseNotes: String?
+    /// The newer release's page, validated against the project's releases URL.
     var verifiedReleaseURL: URL?
+    /// When a check last read an answer from the releases API, a release or none published; failed requests leave it
+    /// unchanged.
     var lastCheckDate: Date?
+    /// The last check's outcome in words for the Settings view.
     var statusMessage: String?
 
     private let httpClient: SecureHTTPClient
@@ -113,6 +125,8 @@ struct GitHubReleasePayload: Codable, Sendable {
     /// A date more than the window ahead of the clock (a backward correction) counts as expired.
     @ObservationIgnored private var lastAttemptDate: Date?
 
+    /// Creates a checker; `currentAppVersion` replaces the bundle version and `defaults` keeps the throttle and a found
+    /// release across launches. With nil `defaults` nothing is remembered.
     init(
         httpClient: SecureHTTPClient = .shared,
         now: @escaping @Sendable () -> Date = { Date() },
@@ -148,6 +162,7 @@ struct GitHubReleasePayload: Codable, Sendable {
     /// How long after an attempt, successful or not, an automatic check waits. A manual check never does.
     static let automaticCheckInterval: TimeInterval = 72 * 3600
 
+    /// The running version: the injected one, else the bundle's short version, else `0.0.0`.
     var currentAppVersion: String {
         customAppVersion ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0")
     }

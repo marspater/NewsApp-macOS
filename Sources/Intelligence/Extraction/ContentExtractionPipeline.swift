@@ -32,7 +32,10 @@ private func loggedExtraction<T>(_ operation: StaticString, _ body: () throws ->
 
 /// Constructed only after protected fetching and document-equivalence checks.
 struct DocumentIdentityEvidence: Equatable, Sendable {
+    /// The canonicalized URL that was asked for.
     let requestedURL: String
+    /// Canonicalized, sorted URLs that serve this document: the final URL and, when verified, its same-origin
+    /// canonical.
     let urls: [String]
 
     fileprivate init(requestedURL: String, urls: [String]) {
@@ -43,37 +46,50 @@ struct DocumentIdentityEvidence: Equatable, Sendable {
 
 // MARK: - Extraction Outcome & Diagnostics
 
+/// The result of reading a publisher page into reader text.
 public enum ExtractionOutcome: Equatable, Sendable {
+    /// Readable text, the page's lead image and the structured reader document when one was built.
     case success(content: String, imageUrl: String?, document: ReaderDocument? = nil)
+    /// The request failed, a DNS answer was substituted, or the response was too large.
     case networkError(reason: String)
+    /// The server answered with a non-2xx status other than 401 and 402.
     case httpError(status: Int)
+    /// The protected client refused the host, port or scheme.
     case securityBlocked(reason: String)
+    /// The response body decoded to nothing.
     case emptyContent
+    /// The URL or page could not be parsed into reader text.
     case contentParsingFailed(reason: String)
+    /// Text was found but `ContentQualityValidator` rejected it.
     case qualityValidationFailed(reason: String)
     /// The publisher shows subscribers only a barrier; the feed teaser is all the reader can show.
     case subscriberOnly
 
+    /// True for `success`.
     public var isSuccess: Bool {
         if case .success = self { return true }
         return false
     }
 
+    /// The text of a `success`; nil otherwise.
     public var content: String? {
         if case .success(let c, _, _) = self { return c }
         return nil
     }
 
+    /// The lead image of a `success`; nil otherwise.
     public var imageUrl: String? {
         if case .success(_, let img, _) = self { return img }
         return nil
     }
 
+    /// The reader document of a `success`; nil otherwise.
     public var document: ReaderDocument? {
         if case .success(_, _, let doc) = self { return doc }
         return nil
     }
 
+    /// A short description of the failure for diagnostics; nil for `success`.
     public var failureReason: String? {
         switch self {
         case .success:
@@ -98,7 +114,9 @@ public enum ExtractionOutcome: Equatable, Sendable {
 
 // MARK: - Content Quality Validator
 
+/// Rejects extracted paragraphs that are too short, mostly boilerplate, repeated or navigation fragments.
 public struct ContentQualityValidator: Sendable {
+    /// Whether the paragraphs pass, and why not when they do not.
     public enum ValidationResult: Equatable {
         case valid
         case rejected(reason: String)
@@ -154,10 +172,13 @@ public struct ContentQualityValidator: Sendable {
 
 // MARK: - Lightweight DOM Parser for HTML
 
+/// One element of the lightweight DOM the reader extraction walks; immutable, with derived values cached behind a lock.
 final class DOMElementNode: Sendable {
+    /// The lowercased tag name.
     let tag: String
     let attributes: [String: String]
     let children: [DOMElementNode]
+    /// The element's own text, outside its children.
     let text: String
     let isSelfClosing: Bool
     private let isNavigationCard: Bool
@@ -173,6 +194,7 @@ final class DOMElementNode: Sendable {
 
     private let cache = OSAllocatedUnfairLock(initialState: Cache())
 
+    /// Creates a node; the tag is lowercased.
     init(
         tag: String,
         attributes: [String: String] = [:],
@@ -199,14 +221,17 @@ final class DOMElementNode: Sendable {
         }
     }
 
+    /// The lowercased `class` attribute, or empty.
     var className: String {
         attributes["class"]?.lowercased() ?? ""
     }
 
+    /// The lowercased `id` attribute, or empty.
     var idValue: String {
         attributes["id"]?.lowercased() ?? ""
     }
 
+    /// The lowercased `data-component` attribute, or empty.
     var dataComponent: String {
         attributes["data-component"]?.lowercased() ?? ""
     }
@@ -299,6 +324,8 @@ final class DOMElementNode: Sendable {
         return results
     }
 
+    /// Whether the reader drops the element: hidden, a navigation card, a boilerplate line or a known call to action.
+    /// Cached unless the task is cancelled.
     var isReaderExcluded: Bool {
         if let cached = cache.withLock({ $0.isReaderExcluded }) {
             return cached
@@ -373,6 +400,9 @@ final class DOMElementNode: Sendable {
             )
         } ?? NSRegularExpression()
 
+    /// The elements that become reader blocks, in document order; `allowDivFallback` lets a container whose children
+    /// yield no text block fall back to its nested containers or to itself.
+    /// Cached per argument unless the task is cancelled.
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
         let cached = cache.withLock {
             allowDivFallback ? $0.readingBlocksWithFallback : $0.readingBlocksWithoutFallback
@@ -513,6 +543,7 @@ final class DOMElementNode: Sendable {
         return readingBlocksFromChildren(allowDivFallback: allowDivFallback)
     }
 
+    /// Inline tags whose text runs on within the surrounding block.
     static let phrasingTags: Set<String> = [
         "a", "abbr", "b", "bdi", "bdo", "cite", "code", "data", "del", "dfn", "em", "font", "i", "ins", "kbd", "label",
         "mark", "q", "s", "samp", "small", "span", "strong", "sub", "sup", "time", "u", "var",
@@ -522,6 +553,8 @@ final class DOMElementNode: Sendable {
     /// source-formatting newlines stay spaces.
     static let lineBreak = "\u{2028}"
 
+    /// The element's text as styled runs, carrying strong, emphasis, code, link and baseline shift down to its
+    /// children. Empty for an excluded element.
     func inlineContent(
         strong: Bool = false, emphasis: Bool = false, code: Bool = false, link: String? = nil,
         baselineShift: Int? = nil
@@ -561,6 +594,7 @@ final class DOMElementNode: Sendable {
         return runs
     }
 
+    /// The reader block the element becomes, or nil when it is excluded or holds nothing readable.
     var readerBlock: ReaderBlock? {
         guard !isReaderExcluded else { return nil }
         if tag == "hr" { return ReaderBlock(kind: .divider, text: "") }
@@ -680,6 +714,8 @@ final class DOMElementNode: Sendable {
         return result
     }
 
+    /// At least two words, starting with a capital, digit or quote and ending in sentence punctuation; such a short
+    /// paragraph is kept.
     static func isShortSentence(_ text: String) -> Bool {
         let words = text.split(whereSeparator: \.isWhitespace)
         guard words.count >= 2, let first = text.first,
@@ -744,6 +780,8 @@ final class DOMElementNode: Sendable {
                     #"\s*([^\s,]+(?:,[^\s,]+)*)(?:\s+([^\s,]+))?\s*(?:,|$)"#)
         } ?? NSRegularExpression()
 
+    /// The image URL to show: the smallest `srcset` candidate at least 1,200 px wide, else the largest, else the first
+    /// lazy-loading or `src` attribute that is not a data URL.
     var readerImageSource: String? {
         // ponytail: bounded responsive candidates for a 1200 px reader; no media-query engine.
         for key in ["data-srcset", "srcset"] {
@@ -819,6 +857,8 @@ final class DOMElementNode: Sendable {
         return links.reduce(0, +) * 5 < total * 4 && (links.max() ?? 0) * 2 < total
     }
 
+    /// The share of the element's text inside links, from 0 to 1, not counting cited prose or excluded widgets inside
+    /// the article body.
     func navigationLinkDensity() -> Double {
         let allText = combinedText().filter { !$0.isWhitespace }.count
         guard allText > 0 else { return 0.0 }
@@ -857,6 +897,7 @@ final class DOMElementNode: Sendable {
 
 // MARK: - HTML DOM Tree Builder
 
+/// Builds the lightweight DOM from HTML, skipping scripts, navigation and other non-content containers.
 enum HTMLDOMBuilder {
     private static let attrRegex =
         loggedExtraction("compileAttrRegex") {
@@ -891,6 +932,7 @@ enum HTMLDOMBuilder {
         return identifier.range(of: #"(?i)pull-?quote"#, options: .regularExpression) != nil ? .pullQuote : .standfirst
     }
 
+    /// Whether the class or id names a pull quote or standfirst.
     static func isEditorial(_ attributes: [String: String]) -> Bool {
         let identifier = "\(attributes["class"] ?? "") \(attributes["id"] ?? "")"
         return editorialPattern.firstMatch(in: identifier, range: NSRange(identifier.startIndex..., in: identifier))
@@ -1276,11 +1318,13 @@ enum HTMLDOMBuilder {
 /// Hardened HTML extraction pipeline performing character encoding normalization,
 /// DOM-aware tree container scoring, link-density filtering, and quality validation.
 final class ContentExtractionPipeline: Sendable {
+    /// The pipeline the app uses, with the shared protected client.
     static let shared = ContentExtractionPipeline()
     private let logger = extractionLogger
 
     private let client: SecureHTTPClient
 
+    /// Creates a pipeline that fetches through `client`.
     init(client: SecureHTTPClient = .shared) { self.client = client }
 
     private static func articleURL(from link: String, allowHTTP: Bool) -> URL? {
@@ -1298,6 +1342,11 @@ final class ContentExtractionPipeline: Sendable {
         await extractArticleWithIdentity(from: link, allowHTTP: allowHTTP).outcome
     }
 
+    /// Fetches an article page through the protected client and extracts reader text, with identity evidence for a
+    /// successful document.
+    ///
+    /// An `http` link is upgraded to `https` unless `allowHTTP`. A 401 or 402 answer is `subscriberOnly`; every other
+    /// failure maps to an `ExtractionOutcome` case, so the function never throws.
     func extractArticleWithIdentity(from link: String, allowHTTP: Bool = false) async
         -> (outcome: ExtractionOutcome, evidence: DocumentIdentityEvidence?)
     {
@@ -1794,8 +1843,11 @@ final class ContentExtractionPipeline: Sendable {
         }.map(\.element)
     }
 
+    /// What a page's JSON-LD and hydration data say about the article.
     struct StructuredArticle {
+        /// The longest article body found, at most 512 KiB.
         var articleBody: String?
+        /// False when the page marks the article as not free; nil otherwise.
         var isAccessibleForFree: Bool?
     }
 
@@ -2147,6 +2199,8 @@ final class ContentExtractionPipeline: Sendable {
 
     // MARK: - Character Encoding Normalization
 
+    /// Decodes page bytes with the `Content-Type` charset, then a `<meta>` charset in the first 2 KiB, then lenient
+    /// UTF-8, falling back to Latin-1 or Windows-1252 when invalid sequences outnumber valid multi-byte characters.
     func decodeHTML(data: Data, response: HTTPURLResponse? = nil) -> String {
         if let contentType = response?.value(forHTTPHeaderField: "Content-Type"),
             let charset = extractCharset(from: contentType),
@@ -2183,8 +2237,11 @@ final class ContentExtractionPipeline: Sendable {
     /// dropping a multi-byte sequence cut off at the end, as a 256 KiB prefix fetch can leave it. Only a true
     /// prefix is dropped: a lead byte (C2–F4) followed by fewer continuation bytes than it announces.
     struct LenientUTF8 {
+        /// The decoded text.
         let text: String
+        /// Invalid sequences replaced by U+FFFD.
         let invalid: Int
+        /// Valid multi-byte characters.
         let multibyte: Int
     }
 
@@ -2197,6 +2254,7 @@ final class ContentExtractionPipeline: Sendable {
         }
     }
 
+    /// Decodes `data` as described for `LenientUTF8`.
     static func lenientUTF8(_ data: Data) -> LenientUTF8 {
         var end = data.endIndex
         for index in data.indices.reversed().prefix(4) where data[index] & 0xC0 != 0x80 {
@@ -2281,6 +2339,7 @@ final class ContentExtractionPipeline: Sendable {
 
     // MARK: - Lead Image Extraction
 
+    /// The first of `extractLeadImages(from:)`, or nil.
     func extractLeadImage(from html: String) -> String? {
         extractLeadImages(from: html).first
     }
