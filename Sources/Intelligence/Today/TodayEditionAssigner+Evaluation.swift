@@ -23,25 +23,34 @@ extension TodayEditionAssigner {
 
     /// What a story's reports say about its coverage; the editorial score and the lane bars read it.
     struct StoryCoverage {
+        /// Original reports, at least one.
         let originalCount: Int
+        /// Distinct publishers.
         let publisherCount: Int
+        /// Whether the story qualifies for the Developing pill.
         let isDeveloping: Bool
+        /// The story's coverage momentum.
         let momentum: BriefingPriorityData.Momentum
+        /// Whether the story is underway and has a substantive new report.
         let hasInMotionUpdate: Bool
     }
 
     /// The evidence ``computeEditorialScore(_:)`` weighs.
     struct EditorialScoreInputs {
         var originalCount: Int
+        /// The Briefing importance level of the story.
         var assessedImportance: StoryImportance
+        /// Whether the overview has an Industry Impact section.
         var hasSectorImpact: Bool
         var momentum: BriefingPriorityData.Momentum
         var isDeveloping: Bool
+        /// The NaturalLanguage importance score.
         var nlImportance: Double
     }
 
     // MARK: - Story Evaluation
 
+    /// Computes one story's evidence from its entry, preloaded signals and the reader's profile.
     static func evaluateStory(_ entry: FeedEntry, context: TodayAssignmentContext) -> EvaluatedStory {
         let rep = entry.representative
         let signals = context.signalsByEntryID[entry.id]
@@ -259,6 +268,8 @@ extension TodayEditionAssigner {
 
     // MARK: - Helper Signals
 
+    /// Whether the headline is a shopping deal ("Deals:", Black Friday and similar), whose editorial score is capped at
+    /// 0.25.
     static func isPromotionalDeal(title: String) -> Bool {
         let lower = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if lower.hasPrefix("deals:") || lower.hasPrefix("deal:") { return true }
@@ -290,6 +301,8 @@ extension TodayEditionAssigner {
         return min(0.95, 0.50 + meanJaccard * 1.25)
     }
 
+    /// Entity slugs from the article's stored entities, else up to 16 names the tagger finds in its title and
+    /// description.
     static func extractFallbackEntities(from article: FeedArticle) -> Set<String> {
         if let stored = article.entities, !stored.isEmpty {
             return Set(stored.map { EntityGraph.slug(name: $0.name, type: $0.type) })

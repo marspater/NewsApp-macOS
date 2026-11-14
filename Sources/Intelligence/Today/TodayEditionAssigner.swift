@@ -40,25 +40,35 @@ enum TodayEditionAssigner {
         }
     }
 
+    /// One story's evidence for lane assignment, computed once per pass.
     struct EvaluatedStory {
         let entry: FeedEntry
+        /// The editorial score from 0 to 1.
         let score: Double
         let originalReportCount: Int
         let publisherCount: Int
+        /// The reader's affinity for the story's publisher, from 0 to 1.
         let publisherAffinity: Double
+        /// Whether the publisher is one of the reader's top-quartile publishers.
         let isTopQuartilePublisher: Bool
+        /// Whether a report comes from a feed the reader starred.
         let isStarredFeed: Bool
         let isDeveloping: Bool
         let groupingConfidence: Double
+        /// Whether the Coverage card variant's publisher, report and grouping bars hold.
         let isCoverageConfident: Bool
         let readingTimeMinutes: Double
+        /// The classified content type and the classifier's confidence; nil when none was found.
         let contentType: (type: TodayContentType, confidence: Double)?
         let interestMatch: Double
         let novelty: Double
+        /// Whether the story is underway and has a substantive new report.
         let hasInMotionUpdate: Bool
+        /// The story's coverage momentum.
         let momentum: BriefingPriorityData.Momentum
 
         var id: String { entry.id }
+        /// The representative's order date, the key of chronological lanes.
         var orderDate: Date { entry.representative.orderDate }
     }
 
@@ -248,6 +258,8 @@ enum TodayEditionAssigner {
 
     // The bars are not private: the shadow evaluation counts the stories that clear each one on its own.
 
+    /// The In Motion placement: a substantive update, rising momentum unless the thresholds allow any, and enough
+    /// confidence; nil otherwise.
     static func inMotionPlacement(
         _ story: EvaluatedStory,
         thresholds: TodayEditionThresholds
@@ -261,6 +273,7 @@ enum TodayEditionAssigner {
         return LanePlacement(story: story, confidence: conf, reason: reason)
     }
 
+    /// The Deep Read placement: long enough or classified as a long-read type, with enough confidence; nil otherwise.
     static func deepReadPlacement(
         _ story: EvaluatedStory,
         thresholds: TodayEditionThresholds
@@ -274,6 +287,8 @@ enum TodayEditionAssigner {
         return LanePlacement(story: story, confidence: conf, reason: reason)
     }
 
+    /// The Your Beat placement: an interest match, a starred feed or a top-quartile publisher, with enough confidence;
+    /// nil otherwise.
     static func yourBeatPlacement(
         _ story: EvaluatedStory,
         thresholds: TodayEditionThresholds
@@ -298,6 +313,7 @@ enum TodayEditionAssigner {
         return LanePlacement(story: story, confidence: conf, reason: reason)
     }
 
+    /// The Outside Your Usual placement: needs reading history, enough novelty, score and confidence; nil otherwise.
     static func outsidePlacement(_ story: EvaluatedStory, context: TodayAssignmentContext) -> LanePlacement? {
         guard context.profile.hasHistory else { return nil }
         let thresholds = context.thresholds

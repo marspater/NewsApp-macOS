@@ -34,6 +34,7 @@ struct TodayUserProfile: Equatable, Sendable {
     /// Total weighted reading/saving interactions recorded in the profile window.
     var interactionCount: Int
 
+    /// A profile with no history.
     static let empty = TodayUserProfile(
         categoryWeights: [:],
         entityWeights: [:],
@@ -43,6 +44,7 @@ struct TodayUserProfile: Equatable, Sendable {
         interactionCount: 0
     )
 
+    /// Creates a profile; nil `topQuartilePublishers` and `interactionCount` are derived from the weights.
     init(
         categoryWeights: [String: Double] = [:],
         entityWeights: [String: Double] = [:],
@@ -67,6 +69,8 @@ struct TodayUserProfile: Equatable, Sendable {
             )
     }
 
+    /// Whether there is enough history to personalize: three interactions, or entity weight of 2 or keyword weight of
+    /// 3.
     var hasHistory: Bool {
         interactionCount >= 3
             || entityWeights.values.reduce(0, +) >= 2.0
@@ -86,11 +90,13 @@ struct TodayUserProfile: Equatable, Sendable {
         return min(1.0, weight / maxWeight)
     }
 
+    /// Whether the publisher is among `topQuartilePublishers`.
     func isTopQuartilePublisher(_ publisher: String) -> Bool {
         let key = EventFeedSummary.displaySource(publisher).lowercased()
         return topQuartilePublishers.contains(key)
     }
 
+    /// The top quarter, at least one, of publishers with a weight of 2 or more, heaviest first and ties by name.
     static func computeTopQuartilePublishers(from weights: [String: Double]) -> Set<String> {
         let engaged = weights.filter { $0.value >= 2.0 }.sorted {
             $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value
@@ -123,30 +129,45 @@ struct TodayUserProfile: Equatable, Sendable {
 /// Optional stored evidence preloaded for one story entry (#934).
 /// When absent, ``TodayEditionAssigner`` derives conservative signals directly from `FeedEntry`.
 struct TodayStorySignals: Equatable, Sendable {
+    /// Original reports in the story's event; nil derives the count from the entry.
     var originalReportCount: Int?
+    /// Stored full texts of the event's members, read for reading time and content type.
     var memberFullTexts: [String] = []
+    /// Entity slugs of the story; empty derives them from the representative when the profile has entity weights.
     var entityIDs: Set<String> = []
+    /// Additional feed URLs of the story's reports, for the starred-feed check.
     var feedURLs: Set<String> = []
+    /// Whether the story's overview has an Industry Impact section, which raises the editorial score of a story that
+    /// is not major.
     var hasSectorImpact: Bool = false
+    /// Confidence that the event's reports belong together; nil derives it from the event summary.
     var groupingConfidence: Double?
+    /// Replaces the NaturalLanguage importance score.
     var nlImportanceOverride: Double?
+    /// Replaces the assessed Briefing importance.
     var resolvedImportanceOverride: StoryImportance?
 }
 
 /// Context passed into one deterministic Today lane-assignment pass.
 struct TodayAssignmentContext: Equatable, Sendable {
+    /// The time the edition is assembled for.
     var now: Date
     /// Selected subscription feed URLs (normalized via `AppSettings.feedKey` when present).
     /// When non-nil, only entries with at least one visible article matching a subscribed feed enter Today.
     var subscribedFeedURLs: Set<String>?
+    /// Feeds the reader starred; their stories qualify for Your Beat.
     var starredFeedURLs: Set<String>
+    /// The reader's interest and publisher profile.
     var profile: TodayUserProfile
+    /// Preloaded signals by story entry id.
     var signalsByEntryID: [String: TodayStorySignals]
+    /// The lane thresholds.
     var thresholds: TodayEditionThresholds
     /// Stories with no photo to show: none in any report of the event, or one that failed to load. The Lead is a
     /// photo slide, so they are not candidates for it (Mars, 11 November 2026); every other lane takes them.
     var imagelessEntryIDs: Set<String> = []
 
+    /// Creates a context; `imagelessEntryIDs` starts empty.
     init(
         now: Date = Date(),
         subscribedFeedURLs: Set<String>? = nil,

@@ -20,6 +20,7 @@ import Foundation
 /// Every query reads already-stored data only and never performs network requests or writes `story_importance`.
 extension DatabaseEngine {
 
+    /// Whether the database has a table with this name. Throws when the query fails.
     func tableExists(_ name: String) throws -> Bool {
         let rows = try eventRows(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1;",
