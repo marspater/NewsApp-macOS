@@ -1,0 +1,1 @@
+- Ports the clustering atom (ClusteringTests with the embedding tests it dispatches: 29 tests, 912 assertions) to the native Swift Testing target under the `.clustering` tag.
