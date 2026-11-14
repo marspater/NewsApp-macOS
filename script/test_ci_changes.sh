@@ -13,16 +13,17 @@ git config user.email check@example.invalid
 git config user.name check
 
 commit() {
-    mkdir -p "$(dirname "$1")"
-    echo "$RANDOM" >> "$1"
+    local path=$1
+    mkdir -p "$(dirname "$path")"
+    echo "$RANDOM" >> "$path"
     git add -A
-    git commit -qm "$1"
+    git commit -qm "$path"
     git rev-parse HEAD
 }
 expect() {
-    local got
-    got=$("$script" "$2" "$3" ${4:+"$4"})
-    [[ "$got" == "$1" ]] || { echo "❌ ci_changes.sh check: $5 (expected $1, got $got)" >&2; exit 1; }
+    local want=$1 base=$2 head=$3 own=$4 what=$5 got
+    got=$("$script" "$base" "$head" ${own:+"$own"})
+    [[ "$got" == "$want" ]] || { echo "❌ ci_changes.sh check: $what (expected $want, got $got)" >&2; exit 1; }
 }
 
 root=$(commit Sources/App.swift)
@@ -43,9 +44,15 @@ expect true "0000000000000000000000000000000000000000" "$code" "" "an unknown ba
 
 # ci_push_base.sh: the stub prints $STUB_SHA, or fails when it is `fail`.
 mkdir -p "$work/bin"
-printf '#!/bin/bash\n[[ "$STUB_SHA" != fail ]] && echo "$STUB_SHA"\n' > "$work/bin/gh"
+cat > "$work/bin/gh" << 'STUB'
+#!/bin/bash
+[[ "$STUB_SHA" != fail ]] && echo "$STUB_SHA"
+STUB
 chmod +x "$work/bin/gh"
-base_of() { STUB_SHA=$1 GITHUB_REPOSITORY=o/r PATH="$work/bin:$PATH" "$push_base" ci.yml before; }
+base_of() {
+    local sha=$1
+    STUB_SHA=$sha GITHUB_REPOSITORY=o/r PATH="$work/bin:$PATH" "$push_base" ci.yml before
+}
 [[ "$(base_of "$docs")" == "$docs" ]] || { echo "❌ ci_push_base.sh check: a finished ancestor is the base" >&2; exit 1; }
 [[ "$(base_of "")" == before ]] || { echo "❌ ci_push_base.sh check: no finished run falls back to BEFORE" >&2; exit 1; }
 [[ "$(base_of fail)" == unknown ]] || { echo "❌ ci_push_base.sh check: an API failure runs everything" >&2; exit 1; }
