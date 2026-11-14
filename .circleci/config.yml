@@ -1,20 +1,28 @@
 version: 2.1
 
 commands:
-  # Stops the macOS job early when the change cannot alter the app or its tests: documentation, changelog fragments,
-  # GitHub and Codemagic configuration, review-bot and linter configuration. Anything else runs, so an unknown
-  # path never skips a test. `.circleci/` is not on the list: a change to this pipeline must exercise it.
+  # Stops the macOS job of a main commit early, before any build:
+  # - when its push changed nothing the app, its tests or this pipeline read (script/ci_changes.sh, the rule GitHub
+  #   Actions uses too), measured from the commit main was at before the push, so every commit of the push counts;
+  # - when main has since moved on by a change that does need a run: that newer pipeline tests a tree holding this
+  #   commit. A newer change that needs no run leaves this one to test, so no commit is skipped by both rules.
+  # A stack merged in a minute is several pushes; this leaves one macOS run instead of one each.
   halt-unless-app-changed:
     steps:
       - run:
-          name: "Skip changes that cannot affect the app"
+          name: "Skip a commit with nothing to test or a newer one to test it"
           command: |
-            git fetch -q origin main || true
-            base=$(git merge-base HEAD FETCH_HEAD 2>/dev/null || true)
-            if [ -z "$base" ] || [ "$base" = "$(git rev-parse HEAD)" ]; then base=HEAD~1; fi
-            unaffecting='(\.md$|^docs/|^LICENSE$|^NOTICE$|^changelog/|^\.github/|^codemagic\.yaml$|^\.codacy|^\.coderabbit\.yaml$|^\.sonarcloud\.properties$|^\.claude/|^\.gitignore$)'
-            if changed=$(git diff --name-only "$base" HEAD) && [ -z "$(echo "$changed" | grep -vE "$unaffecting")" ]; then
-              echo "No app, test or pipeline file changed since $base; skipping."
+            base="<< pipeline.git.base_revision >>"
+            if [ "$(script/ci_changes.sh "${base:-unknown}" HEAD '^\.circleci/')" = false ]; then
+              echo "Nothing the app, its tests or this pipeline read changed since $base; skipping."
+              circleci-agent step halt
+              exit 0
+            fi
+            # A failed fetch leaves the run to test, as before.
+            if git fetch -q origin main && [ "$(git rev-parse FETCH_HEAD)" != "$(git rev-parse HEAD)" ] \
+              && git merge-base --is-ancestor HEAD FETCH_HEAD \
+              && [ "$(script/ci_changes.sh HEAD FETCH_HEAD '^\.circleci/')" = true ]; then
+              echo "main moved on to $(git rev-parse --short FETCH_HEAD) with a change that its own pipeline tests; skipping."
               circleci-agent step halt
             fi
   prepare-macos:
@@ -37,13 +45,13 @@ jobs:
     steps:
       - checkout
       - run:
-          name: "Design lint, evaluation and testsuite self-checks (Swift formatting runs in GitHub Actions)"
+          name: "Design lint, Python tooling and CI script self-checks (Swift formatting runs in GitHub Actions)"
+          # The Python list is test.sh's, so a change to the tooling alone needs no macOS run anywhere.
           command: |
             script/design_lint.sh
-            for check in evaluate publisher_review publisher_dates overview_review importance_review relation_review catalog_review fit_pair_head; do
-              python3 "script/evaluation/$check.py"
-            done
+            script/python_checks.sh
             script/test_ci_testsuite.sh
+            script/test_ci_changes.sh
 
   test-macos:
     macos:

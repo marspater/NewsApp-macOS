@@ -40,7 +40,7 @@ jobs:
             This pull request has been closed due to inactivity.
 
           # Protections: never close items with these attributes
-          exempt-issue-labels: 'pinned,security,blocked,in-progress,help wanted'
+          exempt-issue-labels: 'pinned,security,blocked,in-progress,help wanted,parked'
           exempt-pr-labels: 'pinned,work-in-progress,dependencies'
           exempt-all-milestones: true
           exempt-all-assignees: true

@@ -22,7 +22,8 @@ workflows:
         - $CM_BUILD_DIR/.build
         - $CM_BUILD_DIR/build/DerivedData/SourcePackages
         - $HOME/Library/Caches/org.swift.swiftpm
-    # Documentation-only changes need no macOS build (same rule as the GitHub workflow and CircleCI).
+    # Changes that cannot affect the app need no macOS build: the list in script/ci_changes.sh, which GitHub Actions
+    # and CircleCI run, less this file. Globs cannot re-include PRIVACY.md, which a test checks exists.
     when:
       changeset:
         includes:
@@ -30,6 +31,18 @@ workflows:
         excludes:
           - 'docs/**'
           - '**/*.md'
+          - 'LICENSE'
+          - 'NOTICE'
+          - 'changelog/**'
+          - 'script/evaluation/**'
+          - 'script/training/**'
+          - '.github/**'
+          - '.circleci/**'
+          - '.codacy*'
+          - '.coderabbit.yaml'
+          - '.sonarcloud.properties'
+          - '.claude/**'
+          - '.gitignore'
     scripts:
       - name: Verify Apple Silicon and toolchain
         script: |
