@@ -26,9 +26,12 @@ typealias FeedFetchResult = (
 
 /// Fetches and parses RSS, Atom, and JSON feeds using SecureHTTPClient.
 actor FeedFetcher {
+    /// The fetcher over `SecureHTTPClient.shared` that the refresh uses.
     static let shared = FeedFetcher()
 
+    /// Requests in flight at once across all hosts.
     static let maximumConcurrentFeeds = 6
+    /// Requests in flight at once to one host.
     static let maximumConcurrentFeedsPerHost = 2
 
     private let client: SecureHTTPClient
@@ -39,6 +42,7 @@ actor FeedFetcher {
     private let timeline: NetworkTimeline
     private let logger = NewsSignposts.feedsLog
 
+    /// Creates a fetcher; tests pass their own client, network timeline and clock.
     init(
         client: SecureHTTPClient = .shared, timeline: NetworkTimeline = .shared,
         now: @escaping @Sendable () -> Date = { Date() }
@@ -117,6 +121,7 @@ actor FeedFetcher {
         return nil
     }
 
+    /// Drops articles whose link is not an http(s) web address; articles without a link stay.
     static func webArticles(_ articles: [FeedArticle]) -> [FeedArticle] {
         articles.filter { article in
             article.link.isEmpty || WebLink.url(article.link) != nil

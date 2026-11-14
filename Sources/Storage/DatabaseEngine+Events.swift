@@ -22,6 +22,13 @@ import os
 extension DatabaseEngine {
     // MARK: - Event Overviews
 
+    /// Stores an event overview with its citations in one transaction, replacing the event's earlier overview.
+    ///
+    /// The write is refused, and nothing changes, when the analysis generation moved since `expectedGeneration`, a
+    /// member's publisher text no longer has the hash in `expectedArticleInputs`, or the overview was made for an older
+    /// membership version than the event's (or than the stored overview's, when the event row is gone).
+    /// - Returns: Whether the overview was stored.
+    /// - Throws: When the database is not open or a statement fails; the transaction is rolled back.
     @discardableResult
     func recordEventOverview(
         _ overview: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil,
@@ -219,6 +226,11 @@ extension DatabaseEngine {
         return true
     }
 
+    /// The stored overview of an event with its citations.
+    ///
+    /// - Returns: Nil when the event has none, or when its stored facts or members do not decode, so the caller
+    ///   rebuilds it.
+    /// - Throws: When the database is not open or a statement cannot be prepared.
     func fetchEventOverview(eventID: String) throws -> EventOverviewDocument? {
         guard let db = db else {
             throw NSError(
@@ -363,6 +375,7 @@ extension DatabaseEngine {
         )
     }
 
+    /// The stored row key of a citation, scoped to its overview so two overviews can reuse a citation ID.
     static func citationRowID(overviewID: String, citationID: String) -> String {
         overviewID + "|" + citationID
     }
@@ -402,6 +415,9 @@ extension DatabaseEngine {
         return nil
     }
 
+    /// Deletes an event's stored overview in a transaction.
+    ///
+    /// - Returns: Whether a row was deleted.
     @discardableResult
     func deleteEventOverview(eventID: String) throws -> Bool {
         guard let db = db else {
@@ -435,6 +451,7 @@ extension DatabaseEngine {
         return changes > 0
     }
 
+    /// Deletes every stored event overview; does nothing while the database is closed.
     func clearEventOverviews() throws {
         guard db != nil else { return }
         try executeSimple("DELETE FROM event_overviews;")
@@ -443,6 +460,7 @@ extension DatabaseEngine {
 
     // MARK: - Events
 
+    /// A value bound to a statement parameter by `eventRows(_:_:)`.
     enum EventValue {
         case text(String)
         case integer(Int)
@@ -450,6 +468,7 @@ extension DatabaseEngine {
         case null
     }
 
+    /// An `NSError` in the `DatabaseEngine` domain with code -1 and the message as its description.
     static func eventError(_ message: String) -> NSError {
         NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: message])
     }
@@ -490,6 +509,7 @@ extension DatabaseEngine {
         return rows
     }
 
+    /// Runs `body` in a transaction that commits when it returns and rolls back when it throws.
     func inEventTransaction<T>(_ body: () throws -> T) throws -> T {
         try beginTransaction()
         defer {
@@ -533,6 +553,8 @@ extension DatabaseEngine {
         return nil
     }
 
+    /// The live event an ID refers to, following merge forwards, with its members sorted by article ID; nil once it is
+    /// gone.
     func fetchEvent(id: String) throws -> StoryEvent? {
         guard let live = try resolvedEventID(id),
             let row = try eventRows(
@@ -762,6 +784,11 @@ extension DatabaseEngine {
         return try requireEvent(id)
     }
 
+    /// Adds articles to an event in one transaction, moving them out of any other event. The membership version is
+    /// bumped only when a membership changed.
+    ///
+    /// - Returns: The event after the change.
+    /// - Throws: When the event does not exist or a statement fails.
     @discardableResult
     func addArticles(_ articleIDs: [String], toEvent eventID: String, at date: Date = Date()) throws -> StoryEvent {
         let id = try inEventTransaction { () throws -> String in
@@ -1104,6 +1131,8 @@ extension DatabaseEngine {
 
     // MARK: - Event Matching
 
+    /// The `SELECT ... FROM` head every `eventMatchRows` query extends: article columns, the article's event and
+    /// whether the matcher has processed it.
     static let eventMatchColumns = """
         SELECT a.id, a.title, coalesce(a.description, ''), a.source, a.published_at, m.event_id,
             ms.article_id IS NOT NULL
@@ -1112,6 +1141,8 @@ extension DatabaseEngine {
         LEFT JOIN event_match_state ms ON ms.article_id = a.id
         """
 
+    /// Runs a query that starts with `eventMatchColumns` and maps each row to an `EventMatchRow`; rows without an ID or
+    /// title are dropped.
     func eventMatchRows(_ sql: String, _ values: [EventValue]) throws -> [EventMatchRow] {
         try eventRows(sql, values).compactMap { row in
             guard let id = row[0], let title = row[1] else { return nil }
@@ -1145,6 +1176,7 @@ extension DatabaseEngine {
             ])
     }
 
+    /// The match rows of the given articles, read in batches of 400; unknown IDs are absent.
     func eventMatchRows(articleIDs: [String]) throws -> [EventMatchRow] {
         var rows: [EventMatchRow] = []
         for start in stride(from: 0, to: articleIDs.count, by: 400) {
@@ -1175,7 +1207,6 @@ extension DatabaseEngine {
             """, [.integer(matcherVersion), .real(activeSince.timeIntervalSince1970)])
     }
 
-    /// Every live event updated since `activeSince`, with its members, for merging fragments of one story.
     /// A live event with its membership version and members, for the story pass (#581).
     struct ActiveEvent {
         var id: String
@@ -1183,6 +1214,8 @@ extension DatabaseEngine {
         var members: [EventMatchRow]
     }
 
+    /// Every live event updated since `activeSince`, with its members, for merging fragments of one story. Events
+    /// without members are left out.
     func activeEventMembers(since activeSince: Date) throws -> [ActiveEvent] {
         let since = activeSince.timeIntervalSince1970
         let versions = try eventRows(
@@ -1285,6 +1318,7 @@ extension DatabaseEngine {
         return exclusions
     }
 
+    /// Records in one transaction that the matcher at `matcherVersion` has processed the articles.
     func markEventMatchProcessed(_ articleIDs: [String], matcherVersion: Int, at date: Date = Date()) throws {
         try inEventTransaction { () throws -> Void in
             for articleID in articleIDs {
@@ -1433,6 +1467,7 @@ extension DatabaseEngine {
         return total
     }
 
+    /// The version of this event (not its story) the reader has seen; nil when the event is gone or was never seen.
     func eventSeenVersion(_ eventID: String) throws -> Int? {
         guard let live = try resolvedEventID(eventID) else { return nil }
         return try eventRows("SELECT seen_version FROM event_state WHERE event_id = ?;", [.text(live)]).first?[0]
@@ -1673,6 +1708,8 @@ extension DatabaseEngine {
         var features: String? = nil
     }
 
+    /// Stores the clusterer's pair decisions in one transaction, replacing earlier ones. Only pairs keyed low ID first
+    /// and whose two articles still exist are written.
     func upsertPairDecisions(_ decisions: [PairDecision], matcherVersion: Int, at date: Date = Date()) throws {
         guard !decisions.isEmpty else { return }
         try inEventTransaction { () throws -> Void in

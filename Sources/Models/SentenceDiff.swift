@@ -17,8 +17,10 @@ import NaturalLanguage
 
 /// What changed between two texts of one story, sentence by sentence (V2 #712).
 enum SentenceDiff {
+    /// Whether a sentence is in both texts, only the newer, or only the older.
     enum Kind: Equatable, Sendable { case unchanged, added, retracted }
 
+    /// One sentence of the diff with its kind, in reading order.
     struct Item: Equatable, Sendable {
         let text: String
         let kind: Kind

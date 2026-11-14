@@ -16,11 +16,16 @@ import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
+/// One feed an OPML file lists.
 public struct OPMLItem: Equatable, Sendable {
+    /// The outline's `title`, else its `text`; empty when it has neither.
     public let title: String
+    /// The feed address: `xmlUrl`, or `url` on an `rss` or `atom` outline or on an untyped outline without children.
     public let url: String
+    /// The title of the nearest enclosing outline that names a category; nil at the top level.
     public let folder: String?
 
+    /// Creates an item from its parts.
     public init(title: String, url: String, folder: String?) {
         self.title = title
         self.url = url
@@ -28,6 +33,8 @@ public struct OPMLItem: Equatable, Sendable {
     }
 }
 
+/// Reads the feeds an OPML file lists, under the same guards as feed parsing: no entity or document type declarations,
+/// bounded nesting and outline count.
 public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable {
     /// The feed parser's nesting bound (`FeedXMLParser.maxNestingDepth`); real exports nest two or three levels.
     static let maximumDepth = 64
@@ -45,10 +52,15 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
     /// is a category whose `url` is its website.
     private var urlOnlyLeaves: [OPMLItem?] = []
 
+    /// The feeds the document lists; empty when `parseValidated(data:)` would throw.
     public static func parse(data: Data) -> [OPMLItem] {
         (try? parseValidated(data: data)) ?? []
     }
 
+    /// The feeds the document lists, in document order.
+    ///
+    /// - Throws: An `NSError` in the `OPML` domain: code 2 for a file over 5 MB, code 3 for a document a guard refused
+    ///   (its description says which), code 1 for malformed XML, or the `XMLParser` error.
     public static func parseValidated(data: Data) throws -> [OPMLItem] {
         guard data.count <= OPMLFileReader.maximumBytes else {
             throw NSError(
@@ -214,7 +226,10 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
     }
 }
 
+/// Writes subscriptions as OPML 2.0.
 public enum OPMLExporter: Sendable {
+    /// An OPML 2.0 document of the subscriptions. Feeds in a folder are nested under it (folders sorted by name,
+    /// matched by feed key); the rest follow at the top level. Each outline is titled with the feed's host.
     public static func generateOPML(
         feedURLs: [String], title: String = "News Subscriptions",
         folders: [String: [String]] = [:]
@@ -262,6 +277,7 @@ public enum OPMLExporter: Sendable {
         return xml
     }
 
+    /// Escapes the five XML special characters for attribute and text content.
     internal static func escapeXML(_ string: String) -> String {
         return
             string
@@ -275,8 +291,12 @@ public enum OPMLExporter: Sendable {
 
 /// Reads off the UI actor, with a bound even if the file grows after selection.
 enum OPMLFileReader {
+    /// The largest OPML file accepted, in bytes.
     static let maximumBytes = 5 * 1024 * 1024
 
+    /// Reads at most `maximumBytes` of a file chosen by the reader, off the main actor and inside its security scope.
+    ///
+    /// - Throws: The file error, or an `NSError` in the `OPML` domain with code 2 when the file is larger.
     static func read(_ url: URL) async throws -> Data {
         try await Task.detached(priority: .userInitiated) {
             let scoped = url.startAccessingSecurityScopedResource()
@@ -294,8 +314,10 @@ enum OPMLFileReader {
     }
 }
 
+/// The open and save panels for OPML and story exports.
 @MainActor
 public enum OPMLDialogs {
+    /// Shows an open panel for an OPML file and passes its contents to `onImport`; a read failure shows an alert.
     public static func importOPML(onImport: @escaping (Data) -> Void) {
         let panel = NSOpenPanel()
         panel.title = "Import OPML Subscriptions"
@@ -333,6 +355,7 @@ public enum OPMLDialogs {
         }
     }
 
+    /// Shows a save panel and writes the OPML document as UTF-8; a write failure shows an alert.
     public static func exportOPML(xmlString: String) {
         let panel = NSSavePanel()
         panel.title = "Export OPML Subscriptions"
@@ -358,12 +381,15 @@ struct StoryExportEntry: Codable, Equatable, Sendable {
     let url: String
     /// Absent when the feed gave no usable date.
     let published: Date?
+    /// When the story was saved, in the Saved Stories export.
     var savedAt: Date? = nil
+    /// When the story was read, in the History export.
     var readAt: Date? = nil
 }
 
 /// Both formats are UTF-8 without a byte order mark; an empty list stays an empty list.
 enum StoryExport {
+    /// The entries as a pretty-printed JSON array with sorted keys and ISO 8601 dates.
     static func json(_ entries: [StoryExportEntry]) throws -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -371,6 +397,7 @@ enum StoryExport {
         return try encoder.encode(entries)
     }
 
+    /// The entries as a Markdown list under a level-one title: one linked line per story with its publisher and dates.
     static func markdown(_ entries: [StoryExportEntry], title: String) -> Data {
         var lines = ["# \(title)", ""]
         for entry in entries {

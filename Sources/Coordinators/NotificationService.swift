@@ -26,6 +26,7 @@ import os
 /// event notifies once and later reports thread under the first banner, #587) and what full-mode triage reads
 /// (#588). Everything here comes from the reader's own library and settings.
 struct NotificationDelivery: Sendable {
+    /// The notification mode, which selects the delivery path for the whole pass.
     var mode: AppSettings.NotificationMode
     /// Story id → event id, for stories clustering has grouped; a story outside any event is absent.
     var events: [String: String] = [:]
@@ -61,6 +62,8 @@ struct NotificationDelivery: Sendable {
     }
     /// Asks the existing image worker to prioritize a story; false means no lookup can start.
     var prioritizeImage: @Sendable (String) async -> Bool = { _ in false }
+    /// Withdraws a story's image priority that `prioritizeImage` requested, once its banner no longer waits for the
+    /// photo.
     var withdrawImagePriority: @Sendable (String) async -> Void = { _ in
         // A delivery without an image worker has no queued priority to withdraw.
     }
@@ -76,8 +79,11 @@ struct NotificationDelivery: Sendable {
 
 /// Notification lanes (#665, docs/notifications.md). The raw value is stored; a higher lane wins.
 enum NotificationLane: Int, Comparable, Sendable {
+    /// Breaking stories and interest stories with enough publishers.
     case normal = 0
+    /// Stories from a feed the reader starred.
     case starred = 1
+    /// Exceptional news that passes `NotificationService.isPriority(title:score:publishers:)`.
     case priority = 2
 
     static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
@@ -85,9 +91,13 @@ enum NotificationLane: Int, Comparable, Sendable {
 
 /// A priority key waiting for the next grouped priority banner.
 struct QueuedPriority: Sendable, Equatable {
+    /// The event the key belongs to.
     var event: String
+    /// The headline the grouped banner lists.
     var title: String
+    /// The importance score that qualified the key.
     var score: Double
+    /// The event's lead headline key when the key was queued.
     var leadKey: String
     /// The story that qualified the key, for `PlannedBanner.stories`; empty for a key queued by an earlier build.
     var story = ""
@@ -108,15 +118,20 @@ struct NotificationLedger: Sendable {
     /// Priority keys still waiting, at most 24 h old.
     var priorityQueue: [QueuedPriority] = []
 
+    /// How an announced event was last covered.
     struct Announcement: Sendable, Equatable {
+        /// The event's lead headline key when it was announced; a different key now lets the event notify again.
         var leadKey: String
+        /// The highest lane that announced the event.
         var lane: NotificationLane
     }
 }
 
 /// One banner a pass will post, in posting order.
 struct PlannedBanner: Sendable {
+    /// The lane the banner posts in, whose rate limits it counts against.
     var lane: NotificationLane
+    /// True for a banner that stands for several stories or keys instead of one story.
     var grouped: Bool
     /// The story an individual banner shows; nil for a grouped banner.
     var article: FeedArticle?
@@ -125,8 +140,11 @@ struct PlannedBanner: Sendable {
     var headlines: [String] = []
     /// Stories (starred) or keys (priority) a grouped banner stands for.
     var count = 1
+    /// The starred feed a starred banner covers; nil for the other lanes.
     var feedURL: String?
+    /// The thread later reports of the same story group under.
     var thread: String
+    /// Whether the banner plays the reader's alert sound.
     var sound: Bool
     /// Event id → lead headline key, for each event the banner announces.
     var announces: [String: String] = [:]
@@ -141,7 +159,9 @@ struct PlannedBanner: Sendable {
 enum BannerSuppression: String, Sendable, Equatable {
     /// Permission is not granted: denied, or macOS has not asked yet.
     case notAuthorized
+    /// Banners are off for News in System Settings.
     case alertsOff
+    /// The alert style for News is None.
     case styleNone
     /// A Focus is on, so News draws nothing until it ends.
     case focus
@@ -149,6 +169,7 @@ enum BannerSuppression: String, Sendable, Equatable {
 
 /// Thrown by a post that drew nothing on purpose; the banner is not recorded, so its story may notify again.
 struct BannerSuppressed: Error, Equatable {
+    /// Which setting refused the banner.
     let reason: BannerSuppression
 }
 
@@ -158,8 +179,11 @@ struct BannerSuppressed: Error, Equatable {
 enum BannerGate: Equatable, Sendable {
     /// Draw it. `redacted` when previews are hidden, `persistent` in the Alerts style, which stays until closed.
     case show(redacted: Bool, persistent: Bool)
+    /// Draw nothing, for the given reason.
     case suppress(BannerSuppression)
 
+    /// Applies the notification settings and Focus state in order: authorization, alerts, style, then Focus. A nil
+    /// `focused` (Focus status not shared with News) counts as not focused.
     static func decide(
         authorization: UNAuthorizationStatus, alert: UNNotificationSetting, style: UNAlertStyle,
         previews: UNShowPreviewsSetting, focused: Bool?
@@ -255,6 +279,7 @@ extension NotificationService {
 
 /// Manages NLP-based notification triage and the app-drawn banners.
 final class NotificationService: Sendable {
+    /// The service the refresh pipeline and Settings use, posting through `deliver(_:)`.
     static let shared = NotificationService()
     private let logger = Logger(subsystem: "com.marspater.news", category: "NotificationService")
     /// The importance of a text is a pure function of it and costs two language-model passes; Today scores a whole
@@ -277,10 +302,16 @@ final class NotificationService: Sendable {
     static let normalLimit = 5
     /// Individual priority banners in any rolling 30 minutes, plus one grouped banner.
     static let priorityLimit = 3
+    /// The rolling window `priorityLimit` counts over.
     static let priorityWindow: TimeInterval = 30 * 60
     /// A starred feed gets at most one banner per window.
     static let starredWindow: TimeInterval = 20 * 60
 
+    /// Creates a service; tests pass their own `post` and a short `spacing`.
+    ///
+    /// - Parameters:
+    ///   - post: Draws one banner; `deliver(_:)` when nil.
+    ///   - spacing: The pause between two banners of one pass.
     init(post: (@Sendable (StoryBanner) async throws -> Void)? = nil, spacing: Duration = bannerSpacing) {
         self.post = post ?? { try await NotificationService.deliver($0) }
         self.spacing = spacing
@@ -374,8 +405,11 @@ final class NotificationService: Sendable {
     /// Exceptional news (#665, docs/notifications.md): a score this high, a full-weight signal word in the headline and
     /// this many publishers on the story's event. Stricter than breaking; a story outside any event never qualifies.
     static let priorityScore = 0.75
+    /// The distinct publishers a priority story's event needs.
     static let priorityPublishers = 4
 
+    /// Whether a story is exceptional news: `priorityScore` or higher, `priorityPublishers` or more and a full-weight
+    /// breaking signal word in the title.
     static func isPriority(title: String, score: Double, publishers: Int) -> Bool {
         guard score >= priorityScore, publishers >= priorityPublishers else { return false }
         let padded = MuteRules.paddedPhrase(title)
@@ -420,6 +454,7 @@ final class NotificationService: Sendable {
         return (planner.banners, queued)
     }
 
+    /// The publisher name a banner shows: the first line of the story's source, trimmed.
     static func sourceName(_ article: FeedArticle) -> String {
         (article.source.components(separatedBy: "\n").first ?? article.source).trimmingCharacters(
             in: .whitespacesAndNewlines)
@@ -436,6 +471,7 @@ final class NotificationService: Sendable {
         weights.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }.prefix(limit).map(\.key)
     }
 
+    /// The `rankedInterests(_:limit:)` result as a set, for membership tests during triage.
     static func topInterests(_ weights: [String: Int], limit: Int = 3) -> Set<String> {
         Set(rankedInterests(weights, limit: limit))
     }
@@ -529,6 +565,7 @@ final class NotificationService: Sendable {
         return (withPhoto.isEmpty ? stories : withPhoto).randomElement(using: &generator)
     }
 
+    /// A random story for a test banner, preferring stories with a card image; nil when `stories` is empty.
     static func sampleStory(from stories: [FeedArticle]) -> FeedArticle? {
         let withPhoto = stories.filter { FeedArticle.bestCardImage(in: [$0]) != nil }
         return (withPhoto.isEmpty ? stories : withPhoto).randomElement()
@@ -623,7 +660,9 @@ final class NotificationService: Sendable {
     /// How one banner ended: shown, refused on purpose (settings or Focus), failed to draw, or halted because the pass
     /// may not go on.
     enum PostOutcome: Equatable, Sendable {
+        /// `posted`: the banner was drawn. `halted`: the pass may not go on, so nothing was drawn.
         case posted, halted
+        /// The settings or a Focus refused the banner on purpose.
         case suppressed(BannerSuppression)
         /// The error's domain and code, public in the log as well (#926).
         case failed(domain: String, code: Int)
@@ -689,6 +728,7 @@ final class NotificationService: Sendable {
     }
 }
 
+/// A story with its importance score from `NotificationService.computeImportance(title:description:)`.
 typealias ScoredStory = (article: FeedArticle, score: Double)
 
 /// One full-mode pass's lane decisions (#665, docs/notifications.md), filled lane by lane in posting order.

@@ -18,22 +18,26 @@ import Foundation
 /// Response headers are untrusted: only short printable ASCII is kept, so a hostile value cannot
 /// inject headers or grow the stored row.
 struct FeedValidators: Equatable, Sendable {
+    /// The longest validator kept, in UTF-8 bytes.
     static let maximumLength = 512
 
     let etag: String?
     let lastModified: String?
 
+    /// Keeps each value only when it is non-empty printable ASCII within `maximumLength` after trimming spaces.
     init(etag: String?, lastModified: String?) {
         self.etag = Self.sanitized(etag)
         self.lastModified = Self.sanitized(lastModified)
     }
 
+    /// Reads the `ETag` and `Last-Modified` headers of a response, sanitized.
     init(response: HTTPURLResponse) {
         self.init(
             etag: response.value(forHTTPHeaderField: "ETag"),
             lastModified: response.value(forHTTPHeaderField: "Last-Modified"))
     }
 
+    /// True when neither validator survived; a request is then unconditional.
     var isEmpty: Bool { etag == nil && lastModified == nil }
 
     private static func sanitized(_ value: String?) -> String? {
@@ -58,12 +62,14 @@ enum FeedFailureKind: String, CaseIterable, Sendable {
     /// changing the network. A whole batch of filtered answers is still recorded, so the kind reaches diagnostics.
     static let liftedByManualRefresh: [FeedFailureKind] = connectivity + [.dnsFiltered, .fakeIP]
 
+    /// Whether the kind is one of `connectivity`.
     var isConnectivity: Bool { Self.connectivity.contains(self) }
 }
 
 /// Everything stored about a feed's last requests.
 struct FeedFetchState: Equatable, Sendable {
     var validators: FeedValidators?
+    /// Consecutive failed requests; reset by a success.
     var failures = 0
     /// No request is made before this time. A manual refresh first lifts it for a feed whose last failure was
     /// connectivity (#927); a server's wait and every other failure hold for every refresh.
@@ -74,7 +80,9 @@ struct FeedFetchState: Equatable, Sendable {
     var lastFetchedAt: Date?
     /// What the feed carried the last time its content changed.
     var latestItemAt: Date?
+    /// Items in the last changed response.
     var itemCount = 0
+    /// Items in the last changed response that carried at least `FeedHealth.fullTextCharacters` of text.
     var fullTextItems = 0
     /// When the last recorded failure happened and its cause (`FeedError.failureDetail`). Both outlast a later success
     /// so an export can still show what happened; nil for a failure recorded before schema 35.
@@ -89,6 +97,7 @@ struct FeedContentStats: Equatable, Sendable {
     /// Newest publication date; undated items do not count.
     let latestItem: Date?
 
+    /// Counts a parsed response's items, its full-text items and its newest dated item.
     init(articles: [FeedArticle]) {
         itemCount = articles.count
         fullTextItems = articles.filter { ($0.fullContent?.count ?? 0) >= FeedHealth.fullTextCharacters }.count
@@ -99,17 +108,23 @@ struct FeedContentStats: Equatable, Sendable {
 /// Operational health of one subscription: whether it answers, how recent its items are and how much text it carries.
 /// It describes the feed's plumbing only. It is never a rating of accuracy, reliability or trustworthiness.
 struct FeedHealth: Equatable, Sendable {
+    /// Whether the feed answers: not checked yet, responding, or failing with a count and the next retry.
     enum Availability: Equatable, Sendable {
         case unknown, responding
         case failing(failures: Int, retryAt: Date?)
     }
+    /// How old the newest item is: within `recentWindow`, within `quietWindow`, or older.
     enum Freshness: Equatable, Sendable { case unknown, recent, quiet, stale }
+    /// The share of full-text items: 80% or more, 30% or more, or less.
     enum TextQuality: Equatable, Sendable { case unknown, full, partial, summaries }
 
+    /// A newest item at most this old is recent.
     static let recentWindow: TimeInterval = 3 * 24 * 60 * 60
+    /// A newest item older than this is stale.
     static let quietWindow: TimeInterval = 30 * 24 * 60 * 60
     /// Characters of feed-provided text from which an item counts as full text.
     static let fullTextCharacters = 1200
+    /// The sentence shown with feed health, saying what it is not.
     static let disclaimer =
         "Feed health shows whether a feed responds, how recent its items are and how much text it carries. It is not a rating of accuracy or trustworthiness."
 
@@ -118,6 +133,7 @@ struct FeedHealth: Equatable, Sendable {
     let textQuality: TextQuality
     let latestItem: Date?
 
+    /// Derives the health from the stored fetch state; nil gives unknown on every axis.
     init(_ state: FeedFetchState?, now: Date) {
         guard let state else {
             (availability, freshness, textQuality, latestItem) = (.unknown, .unknown, .unknown, nil)
@@ -163,6 +179,8 @@ struct FeedHealth: Equatable, Sendable {
         return freshness == .stale
     }
 
+    /// A one-line description such as "Responding · Newest item 2 hours ago · Full text", parts joined with middle
+    /// dots.
     func summary(now: Date) -> String {
         let relative = RelativeDateTimeFormatter()
         relative.unitsStyle = .full
@@ -196,7 +214,9 @@ struct FeedHealth: Equatable, Sendable {
 
 /// Retry scheduling for failing feeds. Pure, so the schedule is testable without a clock or a network.
 enum FeedRetryPolicy {
+    /// The wait after the first failure.
     static let baseDelay: TimeInterval = 10 * 60
+    /// The longest backoff of our own; a server's `Retry-After` may ask for up to `maximumRetryAfter`.
     static let maximumDelay: TimeInterval = 6 * 60 * 60
     /// One hostile or mistaken header must not silence a feed for good.
     static let maximumRetryAfter: TimeInterval = 24 * 60 * 60
@@ -309,6 +329,7 @@ extension FeedError {
         return false
     }
 
+    /// The wait a 429 or 503 response asked for; nil for any other error or when it sent none.
     var retryAfter: TimeInterval? {
         if case .serverBusy(_, let retryAfter) = self { return retryAfter }
         return nil

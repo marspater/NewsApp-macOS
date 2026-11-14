@@ -23,6 +23,7 @@ struct EntitySource: Sendable {
     var revision: UInt64 = 0
     /// The entities worth a chip for these stories, the ones most of them name first.
     let entities: @Sendable ([String]) async -> [EntityRecord]
+    /// The dossier of one entity by ID; nil when it is unknown or the library cannot be read.
     let dossier: @Sendable (String) async -> EntityDossier?
 }
 

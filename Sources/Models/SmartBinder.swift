@@ -34,12 +34,18 @@ import Foundation
 public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable {
     public var id: UUID
     public var name: String
+    /// The SF Symbol shown in the sidebar.
     public var icon: String
+    /// Categories a story may have; empty matches any category.
     public var categories: [String]
+    /// Words a story must contain, any or all of them per `matchAllKeywords`; empty matches every story.
     public var includeKeywords: [String]
+    /// Words that keep a story out.
     public var excludeKeywords: [String]
+    /// Publishers a story may come from; empty matches any publisher.
     public var publishers: [String]
     public var createdAt: Date
+    /// True when a story needs every include keyword, false when any one is enough.
     public var matchAllKeywords: Bool
 
     /// A new binder always gets a fresh identity; edits mutate an existing value instead.
@@ -67,6 +73,10 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
         case id, name, icon, categories, includeKeywords, excludeKeywords, publishers, createdAt, matchAllKeywords
     }
 
+    /// Decodes a stored binder; fields added after the first release default when absent (icon "folder", empty lists,
+    /// now, any keyword).
+    ///
+    /// - Throws: The decoder's error when `id` or `name` is missing or a field is malformed.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try container.decode(UUID.self, forKey: .id)
@@ -95,14 +105,17 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
 
     // MARK: - Sidebar Identifiers
 
+    /// The sidebar selection tag, `binder:<UUID>`.
     public var sidebarTag: String {
         "binder:\(id.uuidString)"
     }
 
+    /// Whether a sidebar tag names a binder.
     public static func isBinderTag(_ tag: String) -> Bool {
         tag.hasPrefix("binder:")
     }
 
+    /// The binder ID a sidebar tag names; nil for another tag or a malformed UUID.
     public static func binderID(fromTag tag: String) -> UUID? {
         guard tag.hasPrefix("binder:") else { return nil }
         return UUID(uuidString: String(tag.dropFirst(7)))

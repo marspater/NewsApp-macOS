@@ -27,11 +27,13 @@ import os
 class FeedManager: NSObject, ObservableObject {
     private let logger = NewsSignposts.feedsLog
 
+    /// The collection state of one subscription in the current session, keyed by feed address in `feedStatuses`.
     enum FeedStatus: Equatable, Sendable {
         case idle
         case loading
         case failed(FeedError)
 
+        /// The failure's localized description, or nil while the feed is idle or loading.
         var errorMessage: String? {
             switch self {
             case .idle, .loading: return nil
@@ -40,26 +42,38 @@ class FeedManager: NSObject, ObservableObject {
         }
     }
 
+    /// The library's stories as `ArticleStore` last published them; mirrored from the store, never written by a
+    /// refresh.
     @Published var articles: [FeedArticle] = []
+    /// The latest collection state per subscribed feed address. A cancelled refresh resets `.loading` entries to
+    /// `.idle`.
     @Published var feedStatuses: [String: FeedStatus] = [:]
+    /// True while a refresh is collecting; cleared when it finishes or is cancelled.
     @Published var isAnyFeedLoading: Bool = false
     /// Operational health per subscription, refreshed after every refresh and when a view asks.
     @Published private(set) var feedHealth: [String: FeedHealth] = [:]
     /// The last finished clustering pass and image lookup of this launch, for the diagnostics export (#1006).
     struct ClusteringPass: Sendable {
         let report: EventClusteringReport
+        /// How long the pass took, in seconds of system uptime.
         let seconds: Double
         let finishedAt: Date
     }
+    /// The latest clustering pass that finished this launch; nil before the first.
     private(set) var lastClusteringPass: ClusteringPass?
+    /// The latest publisher-page image lookup's report; nil before the first.
     private(set) var lastImageLookup: StoryCurator.Report?
 
+    /// The settings that hold the subscriptions, sections and refresh interval this manager acts on.
     let appSettings: AppSettings
+    /// The store the refresh writes into and the views read from.
     let articleStore: ArticleStore
 
+    /// One result per requested feed address, as a refresh's fetch step returns them.
     typealias FeedBatch = [FeedFetchResult]
     private let fetchBatch: @Sendable ([String], Bool) async -> FeedBatch
     private let notifyBatch: @MainActor ([FeedArticle], NotificationDelivery) async -> Void
+    /// Classifies stored stories after a refresh while intelligence is on and background work is allowed.
     let enrichmentQueue: EnrichmentQueue
     private let allowsBackgroundWork: @MainActor () -> Bool
     private let imageFinder: StoryImageFinder
@@ -86,6 +100,7 @@ class FeedManager: NSObject, ObservableObject {
     private(set) var imageLookupTask: Task<Void, Never>?
     private var imageLookupDraining: Task<Void, Never>?
     private var imageLookupRunID: UUID?
+    /// Story identifiers a banner waits on, which the running image lookup takes ahead of its remaining rows.
     let imagePriority = StoryImagePriority()
     /// The stories the running lookup was handed, which a cancelled lookup gives back to the pending ones.
     private var runningImageIDs: [String] = []
@@ -145,6 +160,18 @@ class FeedManager: NSObject, ObservableObject {
         var now: () -> Date = { Date() }
     }
 
+    /// Creates the manager, loads the cached stories and, when `schedulesRefresh` is true, schedules background
+    /// refreshes.
+    ///
+    /// - Parameters:
+    ///   - settings: The settings to read; `AppSettings.shared` when nil.
+    ///   - store: The store to fill; `ArticleStore.shared` when nil.
+    ///   - schedulesRefresh: Whether to start the refresh timer, the background activity and the sleep and wake
+    ///     observers.
+    ///   - fetchBatch: Replaces the network fetch, which receives the feed addresses and whether insecure HTTP is
+    ///     allowed.
+    ///   - notifyBatch: Receives a completed refresh's new stories for notification triage.
+    ///   - dependencies: The clock, the energy gate and the services background work runs on.
     init(
         settings: AppSettings? = nil, store: ArticleStore? = nil, schedulesRefresh: Bool = true,
         fetchBatch: (@Sendable ([String], Bool) async -> FeedBatch)? = nil,
@@ -223,6 +250,9 @@ class FeedManager: NSObject, ObservableObject {
 
     // MARK: - Feed URL Management (delegates to AppSettings)
 
+    /// Subscribes to a feed and starts a refresh.
+    ///
+    /// - Returns: False when `AppSettings` refused the address (invalid or already subscribed).
     @discardableResult
     func addFeed(url: String) -> Bool { addFeedNormalized(url: url) != nil }
 
@@ -272,12 +302,14 @@ class FeedManager: NSObject, ObservableObject {
     /// The health entry for a feed, found by its slash-insensitive key so a stored trailing slash still matches.
     func feedHealth(for url: String) -> FeedHealth? { Self.health(for: url, in: feedHealth) }
 
+    /// Looks up a feed's health by exact address first, then by its slash-insensitive `AppSettings.feedKey`.
     static func health(for url: String, in entries: [String: FeedHealth]) -> FeedHealth? {
         if let exact = entries[url] { return exact }
         let key = AppSettings.feedKey(url)
         return entries.first { AppSettings.feedKey($0.key) == key }?.value
     }
 
+    /// Unsubscribes from a feed, drops every status stored under the same feed key and starts a refresh of the rest.
     func removeFeed(url: String) {
         cancelRefresh(preserveManualWaiters: true)
         appSettings.removeFeed(url: url)
@@ -290,6 +322,10 @@ class FeedManager: NSObject, ObservableObject {
 
     // MARK: - OPML Portability
 
+    /// Validates and imports an OPML document, then refreshes when anything was added.
+    ///
+    /// On a validation failure no subscription changes and `ArticleStore.operationError` says why.
+    /// - Returns: The number of feeds added; 0 when none were new or the document was rejected.
     @discardableResult
     func importFeeds(from opmlData: Data) -> Int {
         do { _ = try OPMLParser.parseValidated(data: opmlData) } catch {
@@ -310,6 +346,9 @@ class FeedManager: NSObject, ObservableObject {
         return count
     }
 
+    /// Reads an OPML file (at most 5 MB) and imports it like `importFeeds(from:)`.
+    ///
+    /// - Returns: The number of feeds added; 0 and an `ArticleStore.operationError` when the file could not be read.
     @discardableResult
     func importFeeds(fromFile url: URL) async -> Int {
         do {
@@ -321,39 +360,50 @@ class FeedManager: NSObject, ObservableObject {
         }
     }
 
+    /// The subscriptions and their OPML folders as an OPML document.
     func exportOPML() -> String {
         appSettings.exportOPML()
     }
 
     // MARK: - Section Management
 
+    /// Adds a keyword section to the sidebar through `AppSettings`.
     func addSection(_ name: String) {
         appSettings.addSection(name)
     }
 
+    /// Removes a keyword section from the sidebar through `AppSettings`.
     func removeSection(_ name: String) {
         appSettings.removeSection(name)
     }
 
+    /// Stores the refresh interval and reschedules the foreground timer and background activity with it.
     func setFetchInterval(minutes: Double) {
         appSettings.setFetchInterval(minutes: minutes)
         startBackgroundFetch()
     }
 
+    /// Forwards the notification switch to `AppSettings`.
     func setNotificationsEnabled(_ enabled: Bool) {
         appSettings.setNotificationsEnabled(enabled)
     }
 
+    /// Forwards the on-device intelligence switch to `AppSettings`.
     func setAIEnabled(_ enabled: Bool) {
         appSettings.setAIEnabled(enabled)
     }
 
+    /// Forwards the World Tension opt-in, which also collects the tension panel feeds, to `AppSettings`.
     func setTensionCollectionOptIn(_ enabled: Bool) {
         appSettings.setTensionCollectionOptIn(enabled)
     }
 
     // MARK: - Section Keyword Matching
 
+    /// The stories a sidebar section shows.
+    ///
+    /// Today, Saved Stories and History return every story; an OPML folder returns the stories of its feeds; any other
+    /// section matches stories by keyword through `ArticleSection.matches`.
     func articles(for section: String) -> [FeedArticle] {
         if section == "Today" || section == "Saved Stories" || section == "History" { return articles }
         if let urls = appSettings.opmlFolderFeeds[section] {
@@ -371,6 +421,8 @@ class FeedManager: NSObject, ObservableObject {
 
     // MARK: - Feed Health
 
+    /// Rebuilds `feedHealth` for the current subscriptions from the stored fetch states; keeps the old value when the
+    /// read fails.
     func reloadFeedHealth() async {
         let states: [String: FeedFetchState]
         do {
@@ -403,6 +455,7 @@ class FeedManager: NSObject, ObservableObject {
 
     // MARK: - Caching & Persistence
 
+    /// Loads the stored stories into `articles` and reloads feed health, on a task that does not block the caller.
     func loadCachedArticles() {
         Task { @MainActor [weak self] in
             guard let self = self else { return }
@@ -420,6 +473,9 @@ class FeedManager: NSObject, ObservableObject {
     // MARK: - Background Scheduling
     // macOS schedules opportunistic background refreshes according to the configured interval and system conditions.
 
+    /// Schedules refreshes at the configured interval: a foreground timer plus an `NSBackgroundActivityScheduler` that
+    /// the system may defer. Also schedules entity-graph maintenance. Replaces any earlier schedule; does nothing once
+    /// stopped.
     func startBackgroundFetch() {
         guard !isStopped else { return }
         backgroundTimer?.invalidate()
@@ -535,6 +591,7 @@ class FeedManager: NSObject, ObservableObject {
 
     // MARK: - Ingestion Pipeline
 
+    /// Starts `fetchFeedsAsync(scheduled:)` on a new task without waiting for it.
     func fetchFeeds(scheduled: Bool = false) {
         Task {
             await fetchFeedsAsync(scheduled: scheduled)
@@ -560,6 +617,8 @@ class FeedManager: NSObject, ObservableObject {
         isAnyFeedLoading = false
     }
 
+    /// Stops for good: cancels every observer, timer, refresh, clustering, enrichment, image and notification task, and
+    /// refuses later work. Called when the app terminates.
     func stopBackgroundWork() {
         isStopped = true
         subscriptionTask?.cancel()
@@ -1150,6 +1209,10 @@ class FeedManager: NSObject, ObservableObject {
         return task
     }
 
+    /// Asks the image lookup to take a banner's story first, starting a lookup when none is running.
+    ///
+    /// - Returns: False when no lookup can run (stopped, no image finder, background work not allowed) or the caller
+    ///   was cancelled; the request is then withdrawn.
     func prioritizeBannerImage(_ id: String) async -> Bool {
         guard !isStopped, imageFinder.isAvailable, allowsBackgroundWork() else { return false }
         await imagePriority.request(id)
@@ -1260,6 +1323,7 @@ class FeedManager: NSObject, ObservableObject {
 
     // MARK: - Legacy Helper Forwarder
 
+    /// Whether `IPAddressValidator` blocks the host as a local or private address. Kept for older callers.
     nonisolated static func isBlockedLocalAddress(_ host: String) -> Bool {
         if case .blocked = IPAddressValidator.validateHost(host) { return true }
         return false

@@ -21,7 +21,9 @@ struct EntityIndexCandidate: Sendable, Equatable {
     let articleID: String
     let title: String
     let description: String
+    /// The start of the story's stored body, cut at the caller's text limit.
     let text: String
+    /// The story's source, as the dossier's publisher shares count it.
     let publisher: String
     let publishedAt: Date
     /// The newest publisher-text revision the index read; a later one makes the story a candidate again.
@@ -231,6 +233,7 @@ extension DatabaseEngine {
         (try? JSONEncoder().encode(ids)).flatMap { String(bytes: $0, encoding: .utf8) } ?? "[]"
     }
 
+    /// One indexed entity by ID; nil when the index does not hold it.
     func fetchEntity(id: String) throws -> EntityRecord? {
         try eventRows("SELECT \(Self.entityColumns) FROM entities e WHERE e.id = ?;", [.text(id)])
             .first.flatMap { Self.entityRecord($0) }
@@ -265,14 +268,17 @@ extension DatabaseEngine {
         SELECT CAST((published_at - ?2) / 86400 AS INTEGER) AS day, count(*) FROM entity_mentions
         WHERE entity_id = ?1 AND published_at >= ?2 GROUP BY day;
         """
+    /// A dossier's top eight publishers in the window, by stories that mention the entity.
     static let entityPublishersSQL = """
         SELECT publisher, count(*) AS stories FROM entity_mentions WHERE entity_id = ?1 AND published_at >= ?2
         GROUP BY publisher ORDER BY stories DESC, publisher LIMIT 8;
         """
+    /// A dossier's six most recent stories that mention the entity.
     static let entityStoriesSQL = """
         SELECT a.id, a.title, a.source, m.published_at FROM entity_mentions m JOIN articles a ON a.id = m.article_id
         WHERE m.entity_id = ?1 ORDER BY m.published_at DESC, m.article_id DESC LIMIT 6;
         """
+    /// An entity's strongest stored edges of one relation, for the neighbourhood walk.
     static let entityNeighboursSQL = """
         SELECT target, weight, evidence FROM entity_edges WHERE source = ?1 AND relation = ?2
         ORDER BY weight DESC, target LIMIT ?3;

@@ -19,7 +19,10 @@ import os
 
 /// The only socket gateway used by in-app HTTP clients. TLS stays end-to-end with the client.
 actor NetworkBoundaryProxy {
+    /// The gateway every in-app HTTP client routes through; it resolves with the system's DNS and opens direct
+    /// connections.
     static let shared = NetworkBoundaryProxy()
+    /// Makes the upstream connection to one validated address; tests replace it.
     typealias Connector = @Sendable (NWEndpoint.Host, NWEndpoint.Port) -> NWConnection
     /// Alternates address families, starting with the family of the first answer.
     nonisolated static func interleaved(_ addresses: [String]) -> [String] {
@@ -37,11 +40,9 @@ actor NetworkBoundaryProxy {
         return result
     }
 
+    /// The gateway's log; messages name error domains and codes, never hosts or addresses.
     static let logger = Logger(subsystem: "com.marspater.news", category: "NetworkBoundaryProxy")
 
-    /// Whether a connection that reports `.waiting` with this error is refused for good, so the next address (or a
-    /// rejection) should follow at once. Any other waiting error may clear by itself (a saturated machine, a path
-    /// change); the tunnel's handshake timeout bounds the wait and still fails closed (#769).
     /// The error's domain and numeric code, safe to log publicly; never a host or address.
     nonisolated static func logDescription(_ error: NWError) -> String {
         switch error {
@@ -52,6 +53,9 @@ actor NetworkBoundaryProxy {
         }
     }
 
+    /// Whether a connection that reports `.waiting` with this error is refused for good, so the next address (or a
+    /// rejection) should follow at once. Any other waiting error may clear by itself (a saturated machine, a path
+    /// change); the tunnel's handshake timeout bounds the wait and still fails closed (#769).
     nonisolated static func waitingFailsAtOnce(_ error: NWError) -> Bool {
         guard case .posix(let code) = error else { return false }
         return [.ECONNREFUSED, .ENETUNREACH, .EHOSTUNREACH, .ENETDOWN, .EACCES, .EPERM].contains(code)
@@ -71,10 +75,17 @@ actor NetworkBoundaryProxy {
         return parameters
     }
 
+    /// Whether an established upstream connection may carry the request: only when its establishment report says no
+    /// proxy handled it. An unknown answer (nil) is refused.
     nonisolated static func permitsUpstream(proxyConfigured: Bool?) -> Bool {
         proxyConfigured == false
     }
 
+    /// Creates a gateway; tests pass synchronous DNS answers and their own connector.
+    ///
+    /// - Parameters:
+    ///   - resolver: Synchronous answers for tests; nil resolves through the system and the shared answer cache.
+    ///   - connector: Opens upstream connections; by default direct TCP that asks for no proxy.
     init(
         resolver: Resolver? = nil,
         connector: @escaping Connector = { NWConnection(host: $0, port: $1, using: directParameters) }
@@ -83,6 +94,10 @@ actor NetworkBoundaryProxy {
         self.connector = connector
     }
 
+    /// The loopback port of the running SOCKS5 listener, starting one if needed. A listener that stopped or failed
+    /// since is replaced once.
+    ///
+    /// - Throws: The listener's start error, or `FeedError.network` when no listener could be started.
     func port() async throws -> UInt16 {
         // A listener that stopped or failed after startup (for example across sleep) is replaced once.
         for _ in 0..<2 {
@@ -108,10 +123,15 @@ actor NetworkBoundaryProxy {
         throw FeedError.network("Network gateway unavailable")
     }
 
+    /// A proxy configuration that sends every connection through the running listener, starting it if needed.
+    ///
+    /// - Throws: As `port()`.
     func configuration() async throws -> ProxyConfiguration {
         Self.configuration(port: try await port())
     }
 
+    /// A SOCKS5 proxy configuration for `127.0.0.1:port` that matches every domain and never fails over to a direct
+    /// connection.
     static func configuration(port: UInt16) -> ProxyConfiguration {
         var configuration = ProxyConfiguration(
             socksv5Proxy: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!))
@@ -138,35 +158,44 @@ actor NetworkBoundaryProxy {
 /// What the gateway can time for a request (#929). TLS runs end to end inside the tunnel, so its handshake is not
 /// visible here: the first byte back after connecting stands in for it.
 enum GatewayStage: String, CaseIterable, Sendable {
+    /// Waiting for the host's addresses.
     case dns = "DNS wait"
+    /// From the first connection attempt until one is ready.
     case connect = "connect"
+    /// From connecting until the first byte comes back; stands in for the TLS handshake.
     case firstByte = "first byte after connect"
 }
 
 /// Per-host stage times for the diagnostics export, in memory for this launch only. Reading hosts are not a thing to
 /// keep: past `capacity` hosts, further ones fold into one unnamed entry, and the export names subscriptions alone.
 final class GatewayTimings: Sendable {
+    /// Running totals for one stage of one host.
     struct Stage: Equatable, Sendable {
         private(set) var count = 0
         private(set) var total: TimeInterval = 0
         private(set) var slowest: TimeInterval = 0
         var mean: TimeInterval { count == 0 ? 0 : total / Double(count) }
 
+        /// Counts one measurement.
         mutating func add(_ seconds: TimeInterval) {
             count += 1
             total += seconds
             slowest = max(slowest, seconds)
         }
 
+        /// Adds another entry's totals for the same stage, as the diagnostics export does when it combines hosts.
         mutating func merge(_ other: Stage) {
             count += other.count
             total += other.total
             slowest = max(slowest, other.slowest)
         }
     }
+    /// The stage totals of one host.
     typealias HostTimes = [GatewayStage: Stage]
 
+    /// The launch's timings, which the gateway records into and the diagnostics export reads.
     static let shared = GatewayTimings()
+    /// Hosts named before further ones fold into `overflowHost`.
     static let defaultCapacity = 256
     /// The entry for hosts past the capacity; no host name is empty.
     static let overflowHost = ""
@@ -174,8 +203,11 @@ final class GatewayTimings: Sendable {
     private let hosts = OSAllocatedUnfairLock(initialState: [String: HostTimes]())
     private let capacity: Int
 
+    /// Creates an empty record that names at most `capacity` hosts.
     init(capacity: Int = defaultCapacity) { self.capacity = capacity }
 
+    /// Adds one measurement for a host, case-insensitively; negative times count as zero. A new host past the capacity
+    /// is recorded under `overflowHost`. Thread-safe.
     func record(_ stage: GatewayStage, seconds: TimeInterval, host: String) {
         let name = host.lowercased()
         let capacity = capacity
@@ -185,6 +217,7 @@ final class GatewayTimings: Sendable {
         }
     }
 
+    /// A copy of every host's totals.
     func snapshot() -> [String: HostTimes] { hosts.withLock { $0 } }
 }
 
@@ -200,7 +233,9 @@ final class DNSAnswerCache: Sendable {
         cache.pathMonitor.start(queue: DispatchQueue(label: "com.marspater.news.dns-path"))
         return cache
     }()
+    /// How long an allowed answer is reused.
     static let defaultTimeToLive: Duration = .seconds(60)
+    /// Hosts kept before the entry closest to expiring is dropped.
     static let defaultCapacity = 256
 
     private struct Entry {
@@ -218,6 +253,7 @@ final class DNSAnswerCache: Sendable {
     private let capacity: Int
     private let now: @Sendable () -> ContinuousClock.Instant
 
+    /// Creates an empty cache; tests pass a clock. Only `shared` follows network path changes.
     init(
         timeToLive: Duration = defaultTimeToLive, capacity: Int = defaultCapacity,
         now: @escaping @Sendable () -> ContinuousClock.Instant = { .now }
@@ -235,6 +271,8 @@ final class DNSAnswerCache: Sendable {
         return name
     }
 
+    /// The cached allowed answer for a host, case-insensitive and ignoring a trailing dot; nil when absent or expired.
+    /// An expired entry is removed.
     func answer(for host: String) -> IPAddressValidator.ValidationResult? {
         let key = Self.key(host)
         let time = now()
@@ -272,6 +310,7 @@ final class DNSAnswerCache: Sendable {
         }
     }
 
+    /// Drops every answer and advances `generation`, so lookups started earlier are not stored.
     func clear() {
         state.withLock {
             $0.entries.removeAll()
@@ -279,6 +318,7 @@ final class DNSAnswerCache: Sendable {
         }
     }
 
+    /// The number of cached hosts, expired ones included until they are read or evicted.
     var count: Int { state.withLock(\.entries.count) }
 }
 
@@ -286,6 +326,7 @@ final class DNSAnswerCache: Sendable {
 /// cancellable, so no thread or worker is held, and every lookup ends inside `deadline`: cancelling the caller
 /// resumes it at once and cancels the native query.
 final class ProxyResolver: Sendable {
+    /// Resolves and validates one host.
     typealias Lookup = @Sendable (String) async -> IPAddressValidator.ValidationResult
     /// Longer than a healthy answer by far, shorter than the request timeout that would otherwise absorb a hang.
     static let defaultDeadline: Duration = .seconds(5)
@@ -312,6 +353,7 @@ final class ProxyResolver: Sendable {
         self.deadline = deadline
     }
 
+    /// Creates a resolver over any lookup, with an optional cache and timeline; for tests.
     init(
         lookup: @escaping Lookup, deadline: Duration = defaultDeadline, cache: DNSAnswerCache? = nil,
         timeline: NetworkTimeline? = nil
@@ -322,6 +364,10 @@ final class ProxyResolver: Sendable {
         self.timeline = timeline
     }
 
+    /// Resolves and validates a host, from the cache when it holds an allowed answer.
+    ///
+    /// - Returns: The lookup's verdict, `.unresolvable(reason: "Timed out")` after the deadline, or
+    ///   `.unresolvable(reason: "Cancelled")` when the caller is cancelled. Allowed answers are cached.
     func resolve(_ host: String) async -> IPAddressValidator.ValidationResult {
         guard !Task.isCancelled else {
             Self.cancellations.withLock { $0 += 1 }
@@ -403,6 +449,8 @@ final class DNSLookup: @unchecked Sendable {
     /// Cancelled before the query started: a task already cancelled runs its cancellation handler first.
     private var cancelledBeforeStart = false
 
+    /// Looks a host up through dns_sd and validates each address as it arrives. Cancelling the caller ends the query
+    /// and returns `.unresolvable(reason: "Cancelled")`; a query the system times out returns `.unresolvable`.
     static func resolve(_ host: String) async -> IPAddressValidator.ValidationResult {
         let lookup = DNSLookup()
         return await withTaskCancellationHandler {
@@ -546,9 +594,11 @@ private final class SOCKSListener: @unchecked Sendable {
     }
 }
 
+/// A thread-safe flag that lets exactly one of several racing completions run.
 final class CompletionOnce: @unchecked Sendable {
     private let lock = NSLock()
     private var completed = false
+    /// True for the first caller only.
     func claim() -> Bool {
         lock.withLock {
             guard !completed else { return false }

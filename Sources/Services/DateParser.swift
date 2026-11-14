@@ -16,10 +16,16 @@
 
 import Foundation
 
+/// Parses the publication dates feeds emit: ISO 8601, RFC 822 and the zone-less and date-only variants seen in
+/// practice.
 struct DateParser {
     /// Unknown publication dates remain stable across refreshes; storage orders them by ingestion time.
     static let unknownDate = Date.distantPast
 
+    /// Parses a feed date string, trying ISO 8601 first and then fixed POSIX patterns in UTC. A zone-less date is read
+    /// as UTC, and a wrong weekday is ignored when the rest of the date is valid.
+    ///
+    /// - Returns: Nil for an empty string, one longer than 512 bytes, or one no pattern matches.
     static func parse(_ dateString: String) -> Date? {
         var trimmed = dateString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.utf8.count <= 512 else { return nil }

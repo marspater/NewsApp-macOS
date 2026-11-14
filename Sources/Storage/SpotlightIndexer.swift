@@ -19,15 +19,21 @@ import os
 
 /// Protocol abstracting local CoreSpotlight indexing for saved stories (#559).
 protocol SpotlightIndexing: Sendable {
+    /// Adds or replaces a saved story's item in the index; never throws, so a failure leaves the library change in
+    /// place.
     func indexSavedArticle(_ article: FeedArticle) async
+    /// Removes one story's item from the index.
     func removeSavedArticle(id: String) async
+    /// Removes every item in the saved-stories domain, leaving other domains alone.
     func removeAllSavedArticles() async
 }
 
 /// Local-only CoreSpotlight indexer for saved stories.
 /// Indexes title, publisher, publisher description, and publication date under `"com.marspater.news.saved-stories"`.
 struct SystemSpotlightIndexer: SpotlightIndexing, Sendable {
+    /// The indexer over `CSSearchableIndex.default()`.
     static let shared = SystemSpotlightIndexer()
+    /// The Spotlight domain that holds every saved-story item.
     static let domainIdentifier = "com.marspater.news.saved-stories"
 
     private let logger = Logger(subsystem: "com.marspater.news", category: "SpotlightIndexer")

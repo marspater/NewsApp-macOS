@@ -109,6 +109,8 @@ struct ArticleIdentity: Sendable {
     /// `publisherTitleWindow`, so a daily series with one recurring headline ("Cartoon by …", about a day apart) stays separate. Headlines under four
     /// words are too generic to key.
     static let publisherTitleWindow: TimeInterval = 12 * 3600
+    /// The duplicate key for a publisher's headline (see `publisherTitleWindow`); nil for a headline under four folded
+    /// words or an empty source.
     static func publisherTitleKey(title: String, source: String) -> String? {
         let words = MuteRules.foldedWords(title)
         let publisher = source.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

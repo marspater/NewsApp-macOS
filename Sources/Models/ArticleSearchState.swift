@@ -17,13 +17,17 @@ import SwiftUI
 
 /// Structured query representation produced by reader tag search transformations.
 struct ReaderTagSearchQuery: Equatable, Sendable {
+    /// The category chip, for a category tag; nil for an entity tag.
     let token: ArchiveSearchToken?
+    /// The quoted entity phrase, for an entity tag; empty for a category tag.
     let text: String
 
+    /// The archive query the token and text stand for.
     var query: String {
         ArchiveSearchToken.query(text: text, tokens: token.map { [$0] } ?? [])
     }
 
+    /// Creates a query from its parts.
     init(token: ArchiveSearchToken?, text: String) {
         self.token = token
         self.text = text
@@ -34,22 +38,29 @@ struct ReaderTagSearchQuery: Equatable, Sendable {
 /// and breadcrumb history to return to an open story.
 @MainActor
 final class ArticleSearchState: ObservableObject {
+    /// The free text in the search field, without its chips.
     @Published var searchText: String = ""
+    /// The operator chips in the search field.
     @Published var searchTokens: [ArchiveSearchToken] = []
+    /// Whether the search field is presented.
     @Published var searchPresented: Bool = false
     @Published private(set) var returnStoryStack: [FeedArticleWrap] = []
     @Published private(set) var searchHistory: [String] = []
     private var pendingReturnTextChange = false
     private var pendingReturnTokensChange = false
 
+    /// The story the latest tag search was opened from, which Back returns to; nil when search was not opened from a
+    /// story.
     var returnStory: FeedArticleWrap? {
         returnStoryStack.last
     }
 
+    /// The full archive query: chips first, then free text.
     var archiveQuery: String {
         ArchiveSearchToken.query(text: searchText, tokens: searchTokens)
     }
 
+    /// Whether the field holds any query.
     var isSearching: Bool {
         !archiveQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -93,6 +104,8 @@ final class ArticleSearchState: ObservableObject {
         return pendingReturnTextChange && updated.isEmpty && searchText.isEmpty
     }
 
+    /// The token counterpart of `consumeReturnTextChange(_:)`: true when this observation is the return reset itself,
+    /// which the caller then ignores.
     func consumeReturnTokensChange(_ updated: [ArchiveSearchToken]) -> Bool {
         defer { pendingReturnTokensChange = false }
         return pendingReturnTokensChange && updated.isEmpty && searchTokens.isEmpty
@@ -194,6 +207,7 @@ private struct ArticleSearchStateKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
+    /// The window's search state; nil outside a main window.
     var articleSearchState: ArticleSearchState? {
         get { self[ArticleSearchStateKey.self] }
         set { self[ArticleSearchStateKey.self] = newValue }

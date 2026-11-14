@@ -19,6 +19,7 @@ import os
 /// Configures and manages the 512MB URLCache for WebKit pages, HTTP responses,
 /// and remote media assets. Strictly isolated from domain state and article persistence.
 public final class CacheManager: @unchecked Sendable {
+    /// The shared cache manager; test processes get their own cache directory.
     public static let shared = CacheManager()
     private let logger = Logger(subsystem: "com.marspater.news", category: "CacheManager")
     private let fileManager = FileManager.default

@@ -16,7 +16,10 @@ import Foundation
 
 /// Offline EPUB 3 with fixed internal paths and stored ZIP members.
 enum KnowledgeEPUB {
+    /// Why an export was refused; both descriptions tell the reader what to change.
     enum Error: LocalizedError {
+        /// `tooLarge`: the input passes a document, count or size limit. `storyMissing`: a selected story left the
+        /// library.
         case tooLarge, storyMissing
 
         var errorDescription: String? {
@@ -29,6 +32,9 @@ enum KnowledgeEPUB {
     private static let maxBytes = 32 * 1024 * 1024
     private static let maxDocuments = 500
 
+    /// Checks the input against the export limits (500 documents, 32 MB of text in total) before anything is rendered.
+    ///
+    /// - Throws: `Error.tooLarge` when a limit is passed.
     static func validate(documents: [KnowledgeExportDocument], title: String) throws {
         guard documents.count <= maxDocuments, title.utf8.count <= maxBytes else { throw Error.tooLarge }
         var size = title.utf8.count
@@ -43,6 +49,9 @@ enum KnowledgeEPUB {
         }
     }
 
+    /// Renders the documents as one EPUB 3 chapter with a table of contents, packed as an uncompressed ZIP.
+    ///
+    /// - Throws: `Error.tooLarge` when the input or the archive passes the size limits.
     static func make(documents: [KnowledgeExportDocument], title: String) throws -> Data {
         try validate(documents: documents, title: title)
         let safeTitle = xml(title)

@@ -19,11 +19,18 @@ import os
 
 /// Structured statistics describing the result of a legacy data migration.
 struct MigrationStats: Sendable, Equatable {
+    /// Stories decoded from the legacy JSON cache.
     var articlesFound: Int = 0
+    /// Distinct stories written to the database, saved and cached stories merged by ID.
     var articlesImported: Int = 0
+    /// Stories decoded from the legacy saved-stories list.
     var savedStories: Int = 0
+    /// Distinct read identifiers in the legacy read list, after legacy ID reconciliation.
     var readStates: Int = 0
+    /// Cached stories dropped because the saved list already held the same ID.
     var duplicatesMerged: Int = 0
+    /// Parts that could not be read or a failed import; above zero, the migration is retried at the next launch unless
+    /// the readable data was imported.
     var failures: Int = 0
 }
 
@@ -35,7 +42,9 @@ actor MigrationCoordinator {
     private let userDefaults: UserDefaults
     private let fileManager: FileManager
 
+    /// The `UserDefaults` key that records the completed migration version.
     static let migrationVersionKey = "com.marspater.news.migration_version"
+    /// The version a completed migration records; a stored version below it runs the migration.
     static let currentMigrationVersion = 1
 
     // Legacy storage keys
@@ -43,6 +52,7 @@ actor MigrationCoordinator {
     private let legacySavedStoriesKey = "com.marspater.news.savedStories"
     private let legacyReadListKey = "com.marspater.news.readArticlesList"
 
+    /// Creates a coordinator; tests pass their own defaults and file manager so the real legacy stores stay untouched.
     init(
         database: DatabaseEngine,
         userDefaults: UserDefaults = .standard,
@@ -53,6 +63,7 @@ actor MigrationCoordinator {
         self.fileManager = fileManager
     }
 
+    /// Whether the stored migration version is below `currentMigrationVersion`.
     func isMigrationNeeded() -> Bool {
         let version = userDefaults.integer(forKey: Self.migrationVersionKey)
         return version < Self.currentMigrationVersion

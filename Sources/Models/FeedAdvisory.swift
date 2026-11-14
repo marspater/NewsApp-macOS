@@ -16,6 +16,7 @@ import Foundation
 
 /// A dated maintainer advisory regarding technical deterioration or editorial changes in a source.
 struct FeedAdvisory: Equatable, Sendable {
+    /// What changed about the source.
     enum Reason: String, CaseIterable, Codable, Sendable {
         case technicalDeterioration = "technical_deterioration"
         case readerInaccessible = "reader_inaccessible"
@@ -24,6 +25,7 @@ struct FeedAdvisory: Equatable, Sendable {
         case syndicationShift = "syndication_shift"
         case standardUpdate = "standard_update"
 
+        /// The reason as a short label.
         var displayName: String {
             switch self {
             case .technicalDeterioration: return "Technical issues"
@@ -36,24 +38,30 @@ struct FeedAdvisory: Equatable, Sendable {
         }
     }
 
+    /// How well the advisory's claim is established.
     enum Uncertainty: String, CaseIterable, Codable, Sendable {
         case known, provisional, unknown
     }
 
+    /// When the advisory was written, as an ISO 8601 date.
     let date: String
     let reason: Reason
     let summary: String
+    /// Links that show the change.
     let evidenceLinks: [String]
     let uncertainty: Uncertainty
+    /// `CatalogFeed` IDs to suggest instead.
     let suggestedAlternativeFeedIDs: [String]
 }
 
 /// A detected coverage gap in a reader's subscribed topics.
 struct TopicGap: Identifiable, Equatable, Sendable {
+    /// The catalog set's raw value; one gap per set.
     var id: String { catalogSet.rawValue }
     let catalogSet: CatalogSet
     let title: String
     let rationale: String
+    /// The set's catalog feeds the reader could add.
     let candidateFeeds: [CatalogFeed]
 }
 

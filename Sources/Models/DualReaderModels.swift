@@ -18,8 +18,11 @@ import Foundation
 
 /// Categorization of perspective contrast across paired passages (#717).
 public enum PerspectiveContrastType: String, Codable, Sendable, CaseIterable {
+    /// Both reports say it.
     case consensus
+    /// Both reports cover it, in different terms.
     case divergence
+    /// Only one report says it.
     case uniqueLead
 
     /// What a passage shows against the other report, in words that judge neither publisher (#717): both say it, they
@@ -66,6 +69,7 @@ public struct PassageContrastPair: Identifiable, Hashable, Codable, Sendable {
     public let rightPassageIndex: Int
     public let leftSnippet: String
     public let rightSnippet: String
+    /// The cosine similarity of the two passages' vectors.
     public let similarityScore: Float
     public let contrastType: PerspectiveContrastType
     /// For a unique lead, the report whose passage has no counterpart; the other index only names its closest passage.
@@ -96,11 +100,13 @@ public struct PassageContrastPair: Identifiable, Hashable, Codable, Sendable {
 /// Complete dual-reader alignment session comparing two articles in an event cluster.
 public struct DualReaderSession: Identifiable, Hashable, Sendable {
     public let id: String
+    /// The event both reports belong to; empty when not known.
     public let clusterId: String
     public let leftArticleId: String
     public let rightArticleId: String
     public let leftPublisherName: String
     public let rightPublisherName: String
+    /// One pair per aligned or unique passage, from both sides.
     public let passageAlignments: [PassageContrastPair]
     /// The neural embedder was not available for at least one passage, so every vector is a hashed word count: the
     /// scores measure shared words, not meaning, and the thresholds were not set for them. Set by the alignment
@@ -125,23 +131,28 @@ public struct DualReaderSession: Identifiable, Hashable, Sendable {
         self.passageAlignments = passageAlignments
     }
 
+    /// Pairs where both reports say the same.
     public var consensusCount: Int {
         passageAlignments.filter { $0.contrastType == .consensus }.count
     }
 
+    /// Pairs the reports cover differently.
     public var divergenceCount: Int {
         passageAlignments.filter { $0.contrastType == .divergence }.count
     }
 
+    /// Passages only one report has.
     public var uniqueLeadCount: Int {
         passageAlignments.filter { $0.contrastType == .uniqueLead }.count
     }
 
+    /// The share of pairs in consensus; 0 without pairs.
     public var consensusScore: Double {
         guard !passageAlignments.isEmpty else { return 0.0 }
         return Double(consensusCount) / Double(passageAlignments.count)
     }
 
+    /// The share of pairs that diverge; 0 without pairs.
     public var divergenceScore: Double {
         guard !passageAlignments.isEmpty else { return 0.0 }
         return Double(divergenceCount) / Double(passageAlignments.count)
@@ -164,11 +175,15 @@ public struct DualReaderSession: Identifiable, Hashable, Sendable {
 
 /// Adaptive layout mode for dual-reader presentation based on available viewport width.
 public enum DualReaderLayoutMode: String, Sendable, CaseIterable {
+    /// The two reports in columns.
     case sideBySide
+    /// One report above the other.
     case stacked
 
+    /// The narrowest width, in points, that shows the reports side by side.
     public static let thresholdWidth: CGFloat = 1200.0
 
+    /// Side by side from `thresholdWidth` up, stacked below it.
     public static func mode(for width: CGFloat) -> DualReaderLayoutMode {
         width >= thresholdWidth ? .sideBySide : .stacked
     }

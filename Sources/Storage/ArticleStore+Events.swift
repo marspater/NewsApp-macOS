@@ -20,16 +20,19 @@ import os
 extension ArticleStore {
     // MARK: - Events
 
+    /// Advances `eventRevision` so the feed regroups, and recounts unread cards, since grouping decides their number.
     func noteEventsChanged() {
         eventRevision &+= 1
         // Grouping decides how many cards Unread holds, so the badge follows it.
         Task { await recountUnread() }
     }
 
+    /// One summary per story that holds any of the articles, with its visible members and seen state.
     func eventFeedSummaries(for articleIDs: [String]) async throws -> [EventFeedSummary] {
         try await database.eventFeedSummaries(forArticles: articleIDs)
     }
 
+    /// Every visible report of the event itself, without the story's other events.
     func eventMemberArticles(eventID: String) async throws -> [FeedArticle] {
         try await database.fetchArticles(limit: nil, options: ArticleFetchOptions(eventID: eventID))
     }
@@ -107,6 +110,9 @@ extension ArticleStore {
 
     // MARK: - Event Overviews
 
+    /// Stores an event overview and advances `overviewRevision` when it was stored.
+    ///
+    /// - Returns: False when the write was refused as stale (see `DatabaseEngine.recordEventOverview`).
     @discardableResult
     func recordEventOverview(
         _ document: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil,
@@ -118,10 +124,12 @@ extension ArticleStore {
         return stored
     }
 
+    /// The stored overview of an event; nil when it has none or it no longer decodes.
     func fetchEventOverview(eventID: String) async throws -> EventOverviewDocument? {
         try await database.fetchEventOverview(eventID: eventID)
     }
 
+    /// The overview of the article's event, or failing that of an overview that cites the article.
     func fetchEventOverview(forArticleID articleID: String) async throws -> EventOverviewDocument? {
         try await database.fetchEventOverview(forArticleID: articleID)
     }

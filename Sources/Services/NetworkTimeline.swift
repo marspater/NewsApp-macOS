@@ -31,12 +31,15 @@ final class NetworkTimeline: Sendable {
         }
     }
 
+    /// One timeline event: a path change or a run of resolver outcomes.
     enum Event: Equatable, Sendable {
+        /// The path monitor reported this path.
         case path(PathState)
         /// Consecutive lookups of one class share an entry, so a refresh cannot push a path change out of the window.
         case resolver(outcome: String, count: Int)
     }
 
+    /// A timeline event and when it was recorded; a resolver entry's date is its run's first lookup.
     struct Entry: Equatable, Sendable {
         let date: Date
         var event: Event
@@ -67,6 +70,7 @@ final class NetworkTimeline: Sendable {
         var pathChanges = 0
     }
 
+    /// The launch's timeline, fed by its own path monitor, the gateway's resolver and the feed fetcher.
     static let shared: NetworkTimeline = {
         let timeline = NetworkTimeline()
         timeline.pathMonitor.pathUpdateHandler = { [weak timeline] path in
@@ -75,17 +79,21 @@ final class NetworkTimeline: Sendable {
         timeline.pathMonitor.start(queue: DispatchQueue(label: "com.marspater.news.network-timeline"))
         return timeline
     }()
+    /// Entries kept; older ones are dropped first.
     static let entryLimit = 50
+    /// Refresh batches kept; older ones are dropped first.
     static let batchLimit = 20
 
     private let state = OSAllocatedUnfairLock(initialState: State())
     private let pathMonitor = NWPathMonitor()
     private let now: @Sendable () -> Date
 
+    /// Creates an empty timeline; tests pass a clock. Only `shared` starts its path monitor.
     init(now: @escaping @Sendable () -> Date = { Date() }) { self.now = now }
 
     deinit { pathMonitor.cancel() }
 
+    /// Records a path report. Every report after the first counts as a change, even when its summary reads the same.
     func record(path: PathState) {
         let date = now()
         state.withLock { state in
@@ -97,6 +105,7 @@ final class NetworkTimeline: Sendable {
         }
     }
 
+    /// Records a resolver outcome class, extending the last entry when it holds the same class.
     func record(resolverOutcome outcome: String) {
         let date = now()
         state.withLock { state in
@@ -108,6 +117,7 @@ final class NetworkTimeline: Sendable {
         }
     }
 
+    /// Records a finished refresh batch with the current path, and whether the path changed since `pathChangesAtStart`.
     func record(attempted: Int, failed: Int, takenForOffline: Bool, pathChangesAtStart: Int) {
         let date = now()
         state.withLock { state in
@@ -121,7 +131,9 @@ final class NetworkTimeline: Sendable {
 
     /// Reported path changes so far; a batch compares it before and after.
     var pathChanges: Int { state.withLock(\.pathChanges) }
+    /// The kept events, oldest first.
     var entries: [Entry] { state.withLock(\.entries) }
+    /// The kept refresh batches, oldest first.
     var batches: [Batch] { state.withLock(\.batches) }
 
     private static func append(_ entry: Entry, to entries: inout [Entry]) {

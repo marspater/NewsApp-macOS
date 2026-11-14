@@ -32,7 +32,9 @@ public struct HotspotRegion: Identifiable, Hashable, Codable, Sendable {
     public let id: String
     public let name: String
     public let centroid: GeographicCoordinate
+    /// The region's tension score, 0 ... 100.
     public let tensionScore: Double  // 0.0 ... 100.0
+    /// Active events placed in the region.
     public let activeClusterCount: Int
     public let articleCount: Int
 
@@ -52,6 +54,7 @@ public struct HotspotRegion: Identifiable, Hashable, Codable, Sendable {
         self.articleCount = articleCount
     }
 
+    /// The band the region's score falls in.
     public var tensionLevel: HotspotTensionLevel {
         HotspotTensionLevel.level(for: tensionScore)
     }
@@ -62,7 +65,9 @@ public struct HotspotClusterPin: Identifiable, Hashable, Codable, Sendable {
     public let id: String
     public let title: String
     public let coordinate: GeographicCoordinate
+    /// The event's tension score, 0 ... 100.
     public let tensionScore: Double
+    /// The publishers that reported the event, sorted by name.
     public let topPublisherIds: [String]
     public let storyCount: Int
     /// True for a country, a sea or a region: the coordinate is the center of an area, never where anything happened,
@@ -87,6 +92,7 @@ public struct HotspotClusterPin: Identifiable, Hashable, Codable, Sendable {
         self.isApproximate = isApproximate
     }
 
+    /// The band the pin's score falls in.
     public var tensionLevel: HotspotTensionLevel {
         HotspotTensionLevel.level(for: tensionScore)
     }
@@ -98,6 +104,7 @@ public enum HotspotTensionLevel: String, Codable, Sendable, CaseIterable {
     case significant  // 35 ..< 70
     case critical  // >= 70
 
+    /// Critical from 70, significant from 35, elevated below.
     public static func level(for score: Double) -> HotspotTensionLevel {
         if score >= 70.0 {
             return .critical
@@ -108,6 +115,7 @@ public enum HotspotTensionLevel: String, Codable, Sendable, CaseIterable {
         }
     }
 
+    /// The level as a capitalized word for display.
     public var displayName: String {
         switch self {
         case .elevated:

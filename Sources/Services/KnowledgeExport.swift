@@ -14,32 +14,43 @@
 
 import Foundation
 
+/// A passage an event overview cites, attributed to its publisher.
 struct KnowledgeExportQuote: Sendable {
     let text: String
     let publisher: String
+    /// The source link; empty when neither the citation nor its article has one.
     let url: String
 }
 
+/// One story as the exports write it: stored publisher text, cited passages and the reader's notes, kept apart.
 struct KnowledgeExportDocument: Sendable {
     let id: String
     let title: String
     let publisher: String
     let url: String
+    /// The publication date; nil when the feed gave none.
     let published: Date?
+    /// The stored reader text, or the plain-text description in a digest export.
     let body: String
+    /// The story's feed category, when it has one.
     let tags: [String]
+    /// The passages the story's event overview cites.
     let quotes: [KnowledgeExportQuote]
+    /// The reader's highlights and notes on the story.
     let notes: [UserNote]
 }
 
 /// Explicit local exports; publisher text and private annotations remain separate and attributed.
 enum KnowledgeExport {
+    /// The export form of a citation, falling back to the cited article's source and link, then to "Unknown publisher"
+    /// and an empty link.
     static func quote(_ citation: OverviewCitation, sourceArticle: FeedArticle?) -> KnowledgeExportQuote {
         KnowledgeExportQuote(
             text: citation.quote, publisher: citation.sourceName ?? sourceArticle?.source ?? "Unknown publisher",
             url: citation.sourceURL ?? sourceArticle?.link ?? "")
     }
 
+    /// A double-quoted YAML scalar: quotes and backslashes escaped, control and line-separator characters as `\uXXXX`.
     static func yamlString(_ text: String) -> String {
         var result = "\""
         for scalar in text.unicodeScalars {
@@ -54,6 +65,8 @@ enum KnowledgeExport {
         return result + "\""
     }
 
+    /// Renders the documents as UTF-8 Markdown with YAML front matter. A single document takes the front matter
+    /// (source, link, tags, date) and the top heading; several share one titled file with a section each.
     static func markdown(_ documents: [KnowledgeExportDocument], title: String) -> Data {
         var lines = [
             "---", "title: " + yamlString(title), "format: news-knowledge-v1", "---", "", "# " + escapeMarkdown(title),
@@ -95,6 +108,7 @@ enum KnowledgeExport {
         return Data(lines.joined(separator: "\n").utf8)
     }
 
+    /// Backslash-escapes the Markdown punctuation in `punctuation`, so stored text cannot form emphasis, code or links; /// a line starting with a number and a period can still render as a list.
     static func escapeMarkdown(_ text: String) -> String {
         let punctuation = Set("\\`*_{}[]<>()#+!|~->")
         return text.map { punctuation.contains($0) ? "\\" + String($0) : String($0) }.joined()

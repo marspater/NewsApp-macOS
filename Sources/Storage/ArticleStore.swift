@@ -23,22 +23,33 @@ import os
 /// reactive UI state, full-text search, and legacy migration.
 @MainActor
 final class ArticleStore: ObservableObject {
+    /// The app's store over `DatabaseEngine.shared`; the only one that runs the legacy migration, follows the mute
+    /// rules and owns the Spotlight domain.
     static let shared = ArticleStore()
     let logger = Logger(subsystem: "com.marspater.news", category: "ArticleStore")
 
+    /// The database actor every read and write goes through.
     let database: DatabaseEngine
+    /// Imports the pre-SQLite library on first open; nil for a store over an injected database.
     let migrationCoordinator: MigrationCoordinator?
     /// Runs after a clear of derived data and before the clear returns, so the queues and caches that hold session
     /// state about that data (the enrichment queue, the overview coordinator) have reset by then (#805).
     var analysisClearedHandler: (@MainActor () async -> Void)?
+    /// Mirrors saved stories into Spotlight; updates run one at a time behind `spotlightTail`.
     let spotlightIndexer: any SpotlightIndexing
 
+    /// Up to 500 stories, as `refreshState()` last loaded them; background publications update rows in place.
     @Published private(set) var articles: [FeedArticle] = []
+    /// The saved stories as `refreshState()` last loaded them, kept current by
+    /// `setSaved(article:isSaved:awaitingSpotlight:)`.
     @Published private(set) var savedArticles: [FeedArticle] = []
     @Published private(set) var savedArticleIDs: Set<String> = []
     @Published private(set) var readArticleIDs: Set<String> = []
+    /// Cards the Unread list shows: a story several reports cover counts once, and stories `muting` hides are left out.
     @Published private(set) var unreadCount: Int = 0
+    /// Saved reports in the visible library.
     @Published private(set) var savedCount: Int = 0
+    /// True once the library opened and its first snapshot loaded; false while opening and after a failed startup.
     @Published private(set) var isReady: Bool = false
     /// The reader's mute rules; `unreadCount` leaves out the stories they hide, as the Unread list does (#785).
     private(set) var muting = MuteRules()
@@ -51,6 +62,7 @@ final class ArticleStore: ObservableObject {
         return countSequence
     }
 
+    /// Advances on every published change to stories, read or saved state and counts; views key their queries on it.
     @Published private(set) var revision: UInt64 = 0
     /// Bumped when clustering or the reader changes events; the feed regroups on it.
     @Published var eventRevision: UInt64 = 0
@@ -67,7 +79,10 @@ final class ArticleStore: ObservableObject {
     }
     /// Bumped when an event overview is stored; the Briefing reloads its cited facts on it.
     @Published var overviewRevision: UInt64 = 0
+    /// A sentence for the alert after a failed user-visible operation; nil when there is nothing to report.
     @Published var operationError: String?
+    /// Why the library is open read-only (an integrity issue, a newer schema, a failed pre-migration copy); nil while
+    /// it is writable.
     @Published private(set) var databaseHealthNotice: String?
     /// Set when opening the library or loading its stories failed, so "unavailable" is a fact and not the absence of one.
     @Published private(set) var startupFailed = false
@@ -77,6 +92,7 @@ final class ArticleStore: ObservableObject {
     enum LibraryStatus: Equatable {
         /// The startup open has not finished.
         case opening
+        /// Open and writable.
         case active
         /// A health notice (an integrity issue, a newer schema, a failed pre-migration copy): open, never written.
         case readOnly
@@ -84,6 +100,7 @@ final class ArticleStore: ObservableObject {
         case unavailable
     }
 
+    /// The library's state, derived from `startupFailed`, `databaseHealthNotice` and `isReady` in that order.
     var libraryStatus: LibraryStatus {
         if startupFailed { return .unavailable }
         if databaseHealthNotice != nil { return .readOnly }
@@ -95,6 +112,11 @@ final class ArticleStore: ObservableObject {
     /// of a story that is open ask again (#716).
     @Published private(set) var entityRevision: UInt64 = 0
 
+    /// Creates a store and starts opening the library on a task; `waitForStartup()` resolves when that has finished.
+    ///
+    /// Without an injected `database` the store uses `DatabaseEngine.shared`, a `MigrationCoordinator` over it, and
+    /// follows `AppSettings.shared.muteRules`. A store over an injected database runs no migration unless
+    /// `migrationCoordinator` is passed, and never follows the mute rules.
     init(
         database: DatabaseEngine? = nil,
         migrationCoordinator: MigrationCoordinator? = nil,
@@ -130,6 +152,10 @@ final class ArticleStore: ObservableObject {
         await startup?.value
     }
 
+    /// Opens the library and, when it is healthy, runs the legacy migration, moved-feed and model-generation
+    /// housekeeping, then loads the first snapshot. Sets `isReady`, `startupFailed`, `databaseHealthNotice` and
+    /// `operationError` from the outcome; never throws. Runs once at startup and again when a refresh succeeds after a
+    /// failed startup.
     func initialize() async {
         var timer = NewsSignposts.StageTimer("Library startup")
         do {
@@ -213,6 +239,11 @@ final class ArticleStore: ObservableObject {
         revision &+= 1
     }
 
+    /// Reloads stories, read and saved state and counts from the database and publishes them.
+    ///
+    /// A read or save change that lands during the load restarts it, up to three times, after which one follow-up
+    /// refresh is scheduled; an older load that finishes after a newer one has published is dropped.
+    /// - Returns: Whether this call or a newer one published a snapshot; false on a failed or cancelled load.
     @discardableResult
     func refreshState() async -> Bool {
         do {
@@ -296,6 +327,12 @@ final class ArticleStore: ObservableObject {
 
     // MARK: - Article Ingestion & Upsert
 
+    /// Stores fetched articles from `feedUrl`, with the response's caching `validators` (written in the same
+    /// transaction) when it was a fresh 200, and publishes them through `refreshState()` unless `publish` is false, as
+    /// for a refresh that publishes once at its end.
+    ///
+    /// - Returns: The identifiers of articles stored for the first time; empty on failure, which sets `operationError`
+    ///   unless the call was cancelled.
     @discardableResult
     func batchUpsert(
         articles newArticles: [FeedArticle], feedUrl: String? = nil, validators: FeedValidators? = nil,
@@ -319,6 +356,9 @@ final class ArticleStore: ObservableObject {
 
     // MARK: - Article Queries & Search
 
+    /// Reads stories from the database with optional section, binder, read and saved filters, at most `limit` rows.
+    ///
+    /// - Throws: The database's error when the read fails.
     func fetchArticles(
         section: String? = nil,
         smartBinder: SmartBinder? = nil,
@@ -330,14 +370,21 @@ final class ArticleStore: ObservableObject {
             section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, limit: limit)
     }
 
+    /// A request to open a story from outside the main window, such as a banner click or a note. `token` makes two
+    /// requests for the same story distinct.
     struct NavigationRequest: Equatable, Sendable {
         let token = UUID()
         let articleID: String?
         let link: String
     }
 
+    /// The story the main window should open next; set by banner and notes actions, consumed by `MainView`.
     @Published var pendingNavigation: NavigationRequest?
 
+    /// Resolves a navigation request by stored identifier first, then by canonical link.
+    ///
+    /// - Returns: The story, or nil when neither matches.
+    /// - Throws: The database's error when a read fails.
     func articleForNavigation(_ request: NavigationRequest) async throws -> FeedArticle? {
         if let id = request.articleID,
             let article = try await database.fetchArticles(limit: 1, id: id).first
@@ -349,6 +396,10 @@ final class ArticleStore: ObservableObject {
         return try await database.fetchArticles(limit: 1, options: ArticleFetchOptions(canonicalURL: link)).first
     }
 
+    /// Searches stories through the database's hybrid full-text and semantic search.
+    ///
+    /// A blank query returns `articles`. When the database search fails, falls back to a case-insensitive substring
+    /// match of title, description and source over the loaded `articles`.
     func search(query: String, limit: Int = 100) async -> [FeedArticle] {
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return articles
@@ -371,14 +422,18 @@ final class ArticleStore: ObservableObject {
 
     // MARK: - Read & Saved State Management
 
+    /// Whether the loaded read state marks the story as read; does not query the database.
     func isRead(_ id: String) -> Bool {
         readArticleIDs.contains(id)
     }
 
+    /// Whether the loaded saved state holds the story; does not query the database.
     func isSaved(_ article: FeedArticle) -> Bool {
         savedArticleIDs.contains(article.id)
     }
 
+    /// Marks one story read or unread, updates the in-memory read set and recounts. A failure sets `operationError` and
+    /// reloads the state.
     func markAsRead(id: String, isRead: Bool = true) async {
         do {
             let id = try await database.resolvedArticleID(id)
@@ -403,6 +458,7 @@ final class ArticleStore: ObservableObject {
         }
     }
 
+    /// Flips one story's read state in a single database turn, then reloads the state. A failure sets `operationError`.
     func toggleRead(id: String) async {
         do {
             _ = try await database.toggleRead(articleId: id)
@@ -414,6 +470,7 @@ final class ArticleStore: ObservableObject {
         }
     }
 
+    /// Marks several stories read in one database batch, then reloads the state. A failure sets `operationError`.
     func markAsRead(ids: [String]) async {
         do {
             try await database.markReadBatch(articleIds: ids, isRead: true)
@@ -455,6 +512,9 @@ final class ArticleStore: ObservableObject {
         }
     }
 
+    /// Stores the story if needed and flips its saved state, then reloads the state.
+    ///
+    /// - Returns: The new saved state; false on failure, which sets `operationError`.
     @discardableResult
     func toggleSave(article: FeedArticle) async -> Bool {
         do {
@@ -524,6 +584,7 @@ final class ArticleStore: ObservableObject {
         await refreshState()
     }
 
+    /// The latest queued Spotlight update; each new update waits for it, so the index sees changes in order.
     var spotlightTail: Task<Void, Never>?
 
     // MARK: - Enrichment
@@ -675,6 +736,10 @@ final class ArticleStore: ObservableObject {
 
     // MARK: - Structured Article Analysis
 
+    /// Stores a story's structured analysis and publishes the story. The write is refused when the stored publisher
+    /// text no longer has `expectedInputHash`, or a clear has moved the analysis generation past `expectedGeneration`.
+    ///
+    /// - Returns: Whether the analysis was stored; false when refused or on failure.
     @discardableResult
     func saveArticleAnalysis(
         _ analysis: ArticleAnalysis, for articleId: String, expectedInputHash: String? = nil,
@@ -697,6 +762,7 @@ final class ArticleStore: ObservableObject {
         }
     }
 
+    /// The stored structured analysis for a story, or nil when it has none or the read fails.
     func fetchArticleAnalysis(for articleId: String) async -> ArticleAnalysis? {
         await database.fetchArticleAnalysis(for: articleId)
     }
@@ -769,6 +835,10 @@ final class ArticleStore: ObservableObject {
 
     // MARK: - Retention Pruning
 
+    /// Runs retention: removes read stories older than `keepReadDays` and stale derived rows, never unread, saved or
+    /// annotated stories, then reloads the state.
+    ///
+    /// - Returns: The number of stories removed; 0 on failure.
     @discardableResult
     func pruneOldArticles(keepReadDays: Int = 30) async -> Int {
         do {
