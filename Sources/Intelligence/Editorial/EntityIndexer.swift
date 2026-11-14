@@ -23,10 +23,12 @@ import Foundation
 /// background passes with Apple's NaturalLanguage on this Mac: nothing here is on the feed path, nothing leaves the
 /// device, and a dossier only reads what a pass wrote.
 actor EntityIndexer {
+    /// The indexer background maintenance uses.
     static let shared = EntityIndexer()
 
     /// What one pass did.
     struct Report: Sendable, Equatable {
+        /// Stories whose entities the pass saved.
         let indexedStories: Int
         /// Nil when the pass changed nothing and was not a maintenance pass.
         let graph: DatabaseEngine.EntityGraphReport?

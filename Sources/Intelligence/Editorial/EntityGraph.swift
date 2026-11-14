@@ -25,6 +25,7 @@ enum EntityGraph {
     /// Neighbours of each node with the weight of the edge, as the `entity_edges` table stores it.
     typealias Adjacency = [String: [(id: String, weight: Double)]]
 
+    /// The relation type of an edge between two entities that stories name together.
     static let coReported = "co_reported"
 
     /// The most entities one story contributes to the index. A story names far more than it is about, and every
@@ -47,6 +48,7 @@ enum EntityGraph {
     ]
     private static let olderWeight = 0.1
 
+    /// The weight a story `ageDays` old adds to a pair: 1 under two days, falling to 0.1 from thirty days on.
     static func recencyWeight(ageDays: Double) -> Double {
         recencyBuckets.first { ageDays < $0.belowDays }?.weight ?? olderWeight
     }

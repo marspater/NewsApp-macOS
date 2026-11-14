@@ -18,11 +18,15 @@
 import Foundation
 import SQLite3
 
+/// One evidence passage of an event with the times the novelty check orders it by.
 struct EditorialPassage: Sendable {
     let eventID: String
     let passage: EvidencePassage
+    /// When the publisher released the passage's article; never after `observedAt` for a usable passage.
     let publishedAt: Date
+    /// When News first had the passage; the baseline holds only passages observed by the candidate's own time.
     let observedAt: Date
+    /// Citation metadata for a selected sentence; nil makes an empty one dated `publishedAt`.
     let source: OverviewSourceMetadata?
 
     init(
@@ -37,17 +41,26 @@ struct EditorialPassage: Sendable {
     }
 }
 
+/// The caller's identity of the inputs, returned unchanged with a selection so a stored result can be checked against
+/// them.
 struct EditorialNoveltyStamp: Sendable, Equatable {
     let inputHash: String
     let membershipHash: String
     let analysisVersion: Int
 }
 
+/// Thresholds and bounds for `EditorialNovelty`; the initializer traps on a value outside its range.
 struct EditorialNoveltyPolicy: Sendable {
+    /// Cosine similarity, from -1 to 1, at which a sentence counts as a repeat of a baseline passage, together with
+    /// `strongLexicalOverlap`.
     let repeatSimilarity: Double
+    /// The share of a sentence's words, from 0 to 1, a baseline passage must contain for a repeat.
     let strongLexicalOverlap: Double
+    /// The newest baseline passages indexed, 1 to 1,024.
     let maxPassages: Int
+    /// The most baseline matches and candidate sentences compared, 1 to 64.
     let maxCandidates: Int
+    /// The most normalized embeddings kept, 1 to 4,096; the oldest is evicted first.
     let maxCacheEntries: Int
 
     init(
@@ -65,29 +78,43 @@ struct EditorialNoveltyPolicy: Sendable {
     }
 }
 
+/// The candidate sentence that is furthest from the event's earlier reporting, with its citation.
 struct EditorialNoveltySelection: Sendable {
     let sentence: String
     let citation: OverviewCitation
     let stamp: EditorialNoveltyStamp
+    /// One minus the sentence's highest cosine similarity to a matched baseline passage, from 0 to 2.
     let semanticDistance: Double
 }
 
+/// The outcome of one `EditorialNovelty.analyze` call.
 enum EditorialNoveltyResult: Sendable {
+    /// No earlier passage of the event shares a term with the candidate.
     case lowPrioritySemanticFallback
+    /// Not analyzed now: another analysis is running, the input exceeds a bound, energy is constrained, embeddings
+    /// failed or the cache was cleared meanwhile.
     case deferred
+    /// Every anchored sentence repeats a matched baseline passage.
     case repetition
+    /// No sentence of the candidate names a core entity.
     case noAnchoredSentence
+    /// The most distant anchored sentence that is not a repeat.
     case novel(EditorialNoveltySelection)
 }
 
+/// Embedding cache counters since the actor was created.
 struct EditorialNoveltyStats: Sendable {
+    /// Requested texts already cached.
     let cacheHits: Int
+    /// Distinct uncached texts sent for embedding.
     let cacheMisses: Int
     let entries: Int
 }
 
 /// An isolated experiment: extracts cited source sentences without asserting their truth.
 actor EditorialNovelty {
+    /// Embeds a batch of texts; each vector must have 384 finite components, and a nil or malformed one defers the
+    /// analysis.
     typealias EmbeddingProvider = @Sendable ([String]) async -> [[Float]?]
     private let policy: EditorialNoveltyPolicy
     private let modelVersion: String
@@ -100,6 +127,7 @@ actor EditorialNovelty {
     private var cacheMisses = 0
     private var analyzing = false
 
+    /// Creates an analyzer; `modelVersion` is part of every cache key, so a model change never reuses old vectors.
     init(
         policy: EditorialNoveltyPolicy, modelVersion: String,
         embeddingProvider: @escaping EmbeddingProvider,
@@ -111,16 +139,23 @@ actor EditorialNovelty {
         self.allowsEnergy = allowsEnergy
     }
 
+    /// The current cache counters and size.
     func stats() -> EditorialNoveltyStats {
         .init(cacheHits: cacheHits, cacheMisses: cacheMisses, entries: cache.count)
     }
 
+    /// Empties the embedding cache; an analysis in flight then returns `deferred` instead of using stale vectors.
     func clearCache() {
         generation &+= 1
         cache.removeAll()
         cacheOrder.removeAll()
     }
 
+    /// Finds the candidate sentence naming a core entity that is least like the event's earlier reporting.
+    ///
+    /// The baseline is limited to other articles of the same event published and observed no later than the candidate,
+    /// and matched through an in-memory FTS5 index. One analysis runs at a time; a concurrent call returns `deferred`.
+    /// Throws `CancellationError` when cancelled and an error when the in-memory index cannot be built or queried.
     func analyze(
         candidate: EditorialPassage, baseline: [EditorialPassage], coreEntities: [String],
         stamp: EditorialNoveltyStamp
