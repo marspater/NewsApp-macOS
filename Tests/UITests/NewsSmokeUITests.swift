@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import AppKit
 import XCTest
 
 /// Smoke flows against the Debug app (#1070). Every launch uses one library per test run (`NEWS_LIBRARY_NAME`) in the
@@ -57,6 +58,10 @@ final class NewsSmokeUITests: XCTestCase {
         app = XCUIApplication(url: Self.newsAppURL)
         app.launchEnvironment["NEWS_LIBRARY_NAME"] = Self.libraryName
         app.launchEnvironment["NEWS_FIXTURE_FEED"] = try Self.fixtureFeed()
+        // #1328 diagnostic: pass NEWS_DIAG_* (set as TEST_RUNNER_NEWS_DIAG_*) through to the app.
+        for (key, value) in ProcessInfo.processInfo.environment where key.hasPrefix("NEWS_DIAG_") {
+            app.launchEnvironment[key] = value
+        }
         // Argument-domain defaults: they win over the development container's stored settings without changing them.
         // One subscription, so the fixture is stored whatever the container's own subscriptions are.
         app.launchArguments += [
@@ -124,7 +129,11 @@ final class NewsSmokeUITests: XCTestCase {
     }
 
     func openHeadline(_ headline: String = headline) {
-        searchHeadline(headline).click()
+        let card = searchHeadline(headline)
+        // #1328 diagnostic: the screen and window the reader opens in.
+        print("DIAG1328 screen=\(NSScreen.main?.frame ?? .zero) visible=\(NSScreen.main?.visibleFrame ?? .zero) "
+            + "window=\(app.windows.firstMatch.frame) env=\(ProcessInfo.processInfo.environment.filter { $0.key.hasPrefix("NEWS_DIAG_") })")
+        card.click()
         XCTAssertTrue(
             app.buttons["Save Story"].waitForExistence(timeout: 20)
                 || app.buttons["Remove from Saved Stories"].exists,

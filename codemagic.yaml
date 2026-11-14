@@ -1,4 +1,38 @@
 workflows:
+  # #1328 diagnostic only, never merged: the four crashing flows with and without the annotations inspector.
+  diag-1328:
+    name: Diagnostic 1328 reader crash
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    environment:
+      xcode: "27.0"
+    scripts:
+      - name: Environment
+        script: |
+          sw_vers; xcodebuild -version; system_profiler SPDisplaysDataType | grep -E "Resolution|Display Type|UI Looks" || true
+      - name: Build for testing
+        script: |
+          set -o pipefail
+          xcodebuild build-for-testing -project News.xcodeproj -scheme News -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData -testPlan UITests -quiet
+      - name: Crashing flows as on main
+        script: |
+          xcodebuild test-without-building -project News.xcodeproj -scheme News -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData -testPlan UITests \
+            -only-testing:NewsUITests/NewsSmokeUITests/test04OpenArticle \
+            -only-testing:NewsUITests/NewsSmokeUITests/test07AccessibilityTreeWithImageCredit \
+            -resultBundlePath build/ci/main.xcresult 2>&1 | grep -E "DIAG1328|Test Case|error|crashed|passed|failed" || true
+          ditto -c -k --keepParent build/ci/main.xcresult build/ci/main.xcresult.zip || true
+      - name: Crashing flows without the inspector
+        script: |
+          TEST_RUNNER_NEWS_DIAG_NO_INSPECTOR=1 xcodebuild test-without-building -project News.xcodeproj -scheme News \
+            -destination 'platform=macOS' -derivedDataPath build/DerivedData -testPlan UITests \
+            -only-testing:NewsUITests/NewsSmokeUITests/test04OpenArticle \
+            -only-testing:NewsUITests/NewsSmokeUITests/test07AccessibilityTreeWithImageCredit \
+            -resultBundlePath build/ci/noinspector.xcresult 2>&1 | grep -E "DIAG1328|Test Case|error|crashed|passed|failed" || true
+          ditto -c -k --keepParent build/ci/noinspector.xcresult build/ci/noinspector.xcresult.zip || true
+    artifacts:
+      - build/ci/*.xcresult.zip
   news-arm64-verification:
     name: News macOS arm64 verification
     instance_type: mac_mini_m2

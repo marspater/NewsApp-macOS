@@ -199,7 +199,7 @@ struct ArticleDetailView: View {
                     onHighlight: highlightSelection, onAddNote: beginNote,
                     onToggleInspector: { showsAnnotationsInspector.toggle() })
             )
-            .inspector(isPresented: $showsAnnotationsInspector) { annotationsInspector }
+            .diagnosticInspector(isPresented: $showsAnnotationsInspector) { annotationsInspector }
             .task(id: changesTaskID) { await updateChangeOverlay() }
             .task(id: "\(activeArticle.id):\(articleStore.userNotesRevision)") {
                 let id = activeArticle.id
@@ -2192,5 +2192,19 @@ struct ArticleNavigationCommands: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .toggleReadCommand)) { _ in onToggleRead() }
             .onReceive(NotificationCenter.default.publisher(for: .toggleSaveCommand)) { _ in onToggleSave() }
             .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in onOpenInBrowser() }
+    }
+}
+
+// #1328 diagnostic only, never merged: NEWS_DIAG_NO_INSPECTOR removes the annotations inspector's split column.
+extension View {
+    @ViewBuilder
+    func diagnosticInspector<Content: View>(
+        isPresented: Binding<Bool>, @ViewBuilder content: () -> Content
+    ) -> some View {
+        if ProcessInfo.processInfo.environment["NEWS_DIAG_NO_INSPECTOR"] != nil {
+            self
+        } else {
+            inspector(isPresented: isPresented, content: content)
+        }
     }
 }
