@@ -2178,7 +2178,7 @@ extension NativeSuites.IntelligenceSuite {
 
         // The reader's whole path: a summary that breaks a rule falls back to the final extractive summary, as a
         // malformed answer does; a faithful one is kept.
-        let item = corpus.cases.first { $0.id == "wrong-casualty-figure" }!
+        let item = try #require(corpus.cases.first { $0.id == "wrong-casualty-figure" })
         let content = item.source + " Rescue teams searched the valley through the night. Roads remain closed."
         func analyzer(_ summary: String) -> ArticleAnalyzer {
             ArticleAnalyzer(

@@ -645,7 +645,7 @@ extension NativeSuites.IntelligenceSuite {
                 || overflowSelection.isFallbackRecommended,
             "Either fits tightly in pruned budget or safely flags fallback recommendation")
         for passage in overflowSelection.passages {
-            let source = candidates.first { $0.id == passage.articleID }!
+            let source = try #require(candidates.first { $0.id == passage.articleID })
             expectTrue(
                 passageSelector.extractRankedPassages(from: source).contains { $0.text.contains(passage.text) },
                 "Budget pruning preserves exact publisher text, including punctuation")
