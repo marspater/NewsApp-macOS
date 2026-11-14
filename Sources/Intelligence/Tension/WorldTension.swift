@@ -17,6 +17,7 @@
 import Foundation
 import Observation
 
+/// The four factors the model reasons about; the raw value is the label it writes and the sheet shows.
 enum WorldTensionFactor: String, CaseIterable, Codable, Sendable {
     case novelty = "Novelty"
     case worstCase = "Proximity to worst case"
@@ -24,9 +25,13 @@ enum WorldTensionFactor: String, CaseIterable, Codable, Sendable {
     case scope = "Scope of impact"
 }
 
+/// One panel headline as the model reads it.
 struct WorldTensionHeadline: Codable, Equatable, Sendable {
+    /// `C` plus a number for a current headline, `P` plus a number for a previous one.
     let id: String
+    /// The headline, at most 180 characters.
     let title: String
+    /// The publisher name, at most 50 characters.
     let publisher: String
     /// The story link, so the sheet can open what drives the score. Never sent to the model.
     var link: String? = nil
@@ -39,13 +44,18 @@ struct WorldTensionHeadline: Codable, Equatable, Sendable {
     }
 }
 
+/// The model's reasoned reading of one day's headlines, or a keyword estimate in its place.
 struct WorldTensionAssessment: Codable, Equatable, Sendable {
+    /// The model's explanation for one factor.
     struct Reason: Codable, Equatable, Sendable {
         let factor: WorldTensionFactor
         let explanation: String
     }
+    /// The reading from 0 to 100.
     var score: Int
+    /// One paragraph explaining the reading.
     let summary: String
+    /// One reason per factor.
     let reasons: [Reason]
     /// One sentence naming the main development behind the score. Nil in readings saved before it existed.
     var lead: String? = nil
@@ -107,6 +117,8 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
         return parsed
     }
 
+    /// Whether the report fits the format: a score from 0 to 100, single-line text within length bounds, one reason per
+    /// factor, drivers that name given headlines, at least one current headline and at most 40 unique ones.
     func isValid(headlines: [WorldTensionHeadline]) -> Bool {
         (0...100).contains(score) && (20...400).contains(summary.count) && !summary.contains("\n")
             && reasons.count == 4 && Set(reasons.map(\.factor)) == Set(WorldTensionFactor.allCases)
@@ -269,9 +281,13 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
 /// score, capped at 9. Keyword estimates never enter the average and are shown as they are. The history keeps the
 /// assessed scores; blending happens when a history is handed to the sheet.
 enum WorldTensionSmoothing {
+    /// The smoothing constant, shared with methodology v1.
     static let alpha = TensionWeights.calibratedV1.smoothingAlpha
+    /// How far back accepted readings enter the average: seven days.
     static let window: TimeInterval = 7 * 86400
+    /// Points added per consecutive daily rise of the assessed score.
     static let momentumStep = 3
+    /// The most the momentum term adds.
     static let momentumCap = 9
 
     /// The accepted readings of `history` in day order, estimates left out.
@@ -311,12 +327,18 @@ enum WorldTensionSmoothing {
     }
 }
 
+/// One day's saved or shown reading with the headlines it was made from.
 struct WorldTensionReading: Codable, Equatable, Sendable, Identifiable {
+    /// When the reading was made.
     let evaluatedAt: Date
+    /// A hash of the day, model generation and prompt; ends in `:estimate` for an unsaved keyword estimate.
     let inputHash: String
+    /// The `NewsTextModel.generation` that made the reading.
     let modelGeneration: String
+    /// The current and previous headlines the reading was made from.
     let headlines: [WorldTensionHeadline]
     var assessment: WorldTensionAssessment
+    /// The start of the reading's UTC day.
     var id: Date { TensionMethodology.day(containing: evaluatedAt).start }
 
     /// The reading of the UTC day containing `day`, never a neighbouring day's.
@@ -324,6 +346,7 @@ struct WorldTensionReading: Codable, Equatable, Sendable, Identifiable {
         let start = TensionMethodology.day(containing: day).start
         return readings.first { $0.id == start }
     }
+    /// The band of the score.
     var level: TensionLevel { TensionLevel(index: Double(assessment.score)) }
 
     /// The current headlines behind the score. Model-named drivers count only when the explanation shares a word with
@@ -353,7 +376,11 @@ struct WorldTensionReading: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+/// Why an assessment produced no reading.
 enum WorldTensionError: LocalizedError {
+    /// `disabled`: AI or panel collection is off; `deferred`: energy policy paused it; `insufficientCoverage`: too few
+    /// panel feeds or regions; `unavailable`: no model; `generationFailed`: no answer in the format; `unsupported`: the
+    /// answer named what the headlines lack; `rejected`: the model declined the headlines.
     case disabled, deferred, insufficientCoverage, unavailable, generationFailed, unsupported, rejected
     var errorDescription: String? {
         switch self {
@@ -378,6 +405,7 @@ enum WorldTensionError: LocalizedError {
 /// while the model is merely unavailable, saved as the day's reading when the model declined the headlines, so the
 /// same input is final and only new headlines ask again (#523).
 actor WorldTensionService {
+    /// The service the app uses, backed by the on-device model.
     static let shared = WorldTensionService()
     private let model: NewsTextModel
     private let allowsEnergy: @Sendable () -> Bool
@@ -385,6 +413,7 @@ actor WorldTensionService {
     /// Inputs the model declined while a reading for the day already existed; not asked again this session.
     private var rejectedHashes = Set<String>()
 
+    /// Creates a service with a text model and an energy gate; tests inject both.
     init(
         model: NewsTextModel = .onDevice,
         allowsEnergy: @escaping @Sendable () -> Bool = { IntelligencePolicy.allowsEnergy() }
@@ -412,10 +441,13 @@ actor WorldTensionService {
         "fitness", "diet", "eurovision", "reality show", "influencer", "red carpet",
     ]
 
+    /// Whether the headline carries a `softNewsCues` phrase as whole words outside a negation.
     nonisolated static func isSoftNews(_ title: String) -> Bool {
         TensionEventClassifier.containsCue(TensionEventClassifier.words(title), softNewsCues)
     }
 
+    /// Up to `limit` headlines, one per event and title, soft news left out, taken round-robin across publisher regions
+    /// with cue-bearing headlines first in each region. Ids are `prefix` plus a running number.
     nonisolated static func headlines(_ rows: [TensionCorpusRow], prefix: String, limit: Int) -> [WorldTensionHeadline]
     {
         // One representative per event, balanced across publisher regions. Coverage is measured before this bound.
@@ -460,6 +492,7 @@ actor WorldTensionService {
         }
     }
 
+    /// The model prompt for the current and previous headlines, framed as untrusted data.
     nonisolated static func prompt(current: [WorldTensionHeadline], previous: [WorldTensionHeadline]) -> String {
         let data = (current + previous).map {
             "[\($0.id)] \($0.title)".components(separatedBy: .newlines).joined(separator: " ")
@@ -512,6 +545,12 @@ actor WorldTensionService {
             """
     }
 
+    /// Assesses today's panel headlines and returns the history as shown.
+    ///
+    /// Reuses the stored reading for the same input unless `force`, joins a request already running for it, and on a
+    /// model failure without today's assessment returns a keyword estimate, saved only when the model declined the
+    /// headlines. Throws `WorldTensionError` when disabled, deferred, short of coverage or without an estimate,
+    /// `CancellationError` when cancelled or when derived data was cleared meanwhile, and database errors.
     func assess(database: DatabaseEngine, now: Date, aiEnabled: Bool, collectionEnabled: Bool, force: Bool = false)
         async throws -> [WorldTensionReading]
     {
@@ -655,6 +694,7 @@ actor WorldTensionService {
 @MainActor @Observable final class WorldTensionModel {
     var state: WorldTensionState
 
+    /// Creates the model with an initial state.
     init(state: WorldTensionState = WorldTensionState()) {
         self.state = state
     }
@@ -662,6 +702,7 @@ actor WorldTensionService {
 
 /// What every World Tension surface shows (#781): one value, held by `WorldTensionModel`.
 struct WorldTensionState: Equatable, Sendable {
+    /// What the surfaces show for the current state.
     enum Status: Equatable, Sendable {
         /// AI story analysis or panel collection is off: nothing is assessed or shown.
         case aiOff, collectionOff
@@ -677,7 +718,9 @@ struct WorldTensionState: Equatable, Sendable {
         case unavailable
     }
 
+    /// Whether AI story analysis is on.
     var aiEnabled = true
+    /// Whether panel collection is on.
     var collectionEnabled = true
     /// Readings as shown (methodology v3, and where the Mac's region has a war next door, raised by what was near the
     /// reader that week), oldest first.
@@ -688,10 +731,12 @@ struct WorldTensionState: Equatable, Sendable {
     var problem: String?
     /// Today's panel headlines when today has no reading, so the sheet can show what is waiting to be assessed.
     var panelHeadlines: [WorldTensionHeadline] = []
+    /// True while a load is running.
     var isLoading = false
 
     private var today: Date { TensionMethodology.day(containing: loadedAt).start }
 
+    /// The status the surfaces show, derived from the settings, the history and the last problem.
     var status: Status {
         guard aiEnabled else { return .aiOff }
         guard collectionEnabled else { return .collectionOff }

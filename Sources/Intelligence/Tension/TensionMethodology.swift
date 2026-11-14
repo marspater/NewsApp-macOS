@@ -30,43 +30,57 @@ enum TensionMacroRegion: String, CaseIterable, Codable, Sendable {
 
 /// A fixed panel feed, recorded as the catalog verified it. A changed catalog entry is a methodology change.
 struct TensionPanelMember: Equatable, Sendable {
+    /// The feed's id in the bundled catalog.
     let catalogID: String
+    /// The feed URL; stored articles are matched to the panel by it.
     let url: String
+    /// The publisher's world region.
     let region: TensionMacroRegion
 }
 
 /// Which panel feeds delivered dated items on an observation day.
 struct TensionCoverage: Equatable, Sendable {
+    /// Whether a day can be assessed.
     enum Status: String, Sendable {
         /// No panel feed delivered an item that day: a gap, never zero.
         case noData
         /// Too few panel feeds or regions reported for a comparable day.
         case insufficient
+        /// Enough panel feeds from enough regions reported for the day to be assessed.
         case sufficient
     }
 
+    /// The panel feeds that delivered dated items that day.
     let reporting: [TensionPanelMember]
+    /// The regions of those feeds.
     let regions: Set<TensionMacroRegion>
+    /// Whether the day can be assessed.
     let status: Status
 }
 
 /// The indicator describes what a fixed panel of international news feeds reported about unique events. It is not a
 /// measure of danger, risk or the state of the world.
 struct TensionMethodology: Equatable, Sendable {
+    /// The methodology version; scores of different versions are not comparable.
     let version: Int
     /// Language of the panel and of the classification cues.
     let language: String
+    /// The fixed panel feeds.
     let panel: [TensionPanelMember]
     /// A day is assessed only when more than half of the panel feeds, from more than half of the panel's regions,
     /// delivered dated items published that day.
     let minimumReportingFeeds: Int
+    /// See `minimumReportingFeeds`.
     let minimumReportingRegions: Int
     /// Late feed items and event clustering can still change a day until this long after it ends.
     let provisionalPeriod: TimeInterval
 
+    /// The sentence shown with every reading: what the indicator measures and what it does not.
     static let disclaimer =
         "News tension describes what a fixed panel of international news feeds reported, not how dangerous the world is. It depends on which outlets are in the panel, what they chose to cover and the language they publish in."
 
+    /// The first methodology: twelve English panel feeds, seven feeds from four regions for a comparable day, and a
+    /// 24-hour provisional period.
     static let v1 = TensionMethodology(
         version: 1,
         language: "en",
@@ -100,8 +114,10 @@ struct TensionMethodology: Equatable, Sendable {
         provisionalPeriod: 24 * 60 * 60
     )
 
+    /// The regions the panel covers.
     var panelRegions: Set<TensionMacroRegion> { Set(panel.map(\.region)) }
 
+    /// The panel member with this feed URL; nil for a feed outside the panel.
     func member(feedURL: String) -> TensionPanelMember? {
         panel.first { $0.url == feedURL }
     }
@@ -113,10 +129,13 @@ struct TensionMethodology: Equatable, Sendable {
         return calendar.dateInterval(of: .day, for: date) ?? DateInterval(start: date, duration: 24 * 60 * 60)
     }
 
+    /// Whether the day can still change: `now` is within `provisionalPeriod` after the day ends.
     func isProvisional(_ day: DateInterval, now: Date) -> Bool {
         now < day.end.addingTimeInterval(provisionalPeriod)
     }
 
+    /// The day's coverage from the feeds that reported: `noData` with none, `sufficient` from `minimumReportingFeeds`
+    /// feeds in `minimumReportingRegions` regions, `insufficient` otherwise.
     func coverage(reportingFeedURLs: Set<String>) -> TensionCoverage {
         let reporting = panel.filter { reportingFeedURLs.contains($0.url) }
         let regions = Set(reporting.map(\.region))
@@ -142,8 +161,10 @@ enum TensionEventType: String, CaseIterable, Codable, Sendable {
 
 /// Order of magnitude of the largest figure a fact reports.
 enum TensionMagnitude: Int, CaseIterable, Comparable, Codable, Sendable {
+    /// No figure, then 1–9, 10–99, 100–999 and 1,000 or more.
     case notReported, units, tens, hundreds, thousands
 
+    /// The magnitude of a count; zero or less is `notReported`.
     init(count: Int) {
         switch count {
         case ..<1: self = .notReported
@@ -159,20 +180,29 @@ enum TensionMagnitude: Int, CaseIterable, Comparable, Codable, Sendable {
 
 /// Escalation as the day's facts report it explicitly; nothing is inferred from changing figures.
 enum TensionEscalation: String, Codable, Sendable {
+    /// No cue, escalation cues only, de-escalation cues only, or both.
     case noSignal, escalating, deescalating, mixed
 }
 
 /// One unique event's classification, with the facts behind each finding so explanations can cite them.
 struct TensionEventClassification: Equatable, Sendable {
+    /// The methodology that produced the classification.
     let methodologyVersion: Int
     /// Nil when no fact carries a cue of any counted type.
     let type: TensionEventType?
+    /// Ids of the facts that carry a cue of `type`.
     let typeEvidence: [String]
+    /// The magnitude of the largest death figure any fact reports.
     let deaths: TensionMagnitude
+    /// The magnitude of the largest figure of people injured, displaced, evacuated or missing.
     let affected: TensionMagnitude
+    /// Ids of the facts that report a death or harm figure.
     let magnitudeEvidence: [String]
+    /// Escalation as the facts state it.
     let escalation: TensionEscalation
+    /// Ids of the facts with an escalation or de-escalation cue, escalating ones first.
     let escalationEvidence: [String]
+    /// Facts classified.
     let factCount: Int
 }
 
@@ -180,6 +210,7 @@ struct TensionEventClassification: Equatable, Sendable {
 /// model's restatement, a headline or a generated overview. Cues are English words and phrases matched as whole words;
 /// a cue right after a negation ("no", "denied", "rejected"…) does not count.
 enum TensionEventClassifier {
+    /// Whole-word cues per event type; a cue right after a negation does not count.
     static let typeCues: [TensionEventType: [String]] = [
         .armedConflict: [
             "airstrike", "airstrikes", "air strike", "air strikes", "missile strike", "missile strikes", "drone strike",
@@ -211,12 +242,14 @@ enum TensionEventClassifier {
         ],
     ]
 
+    /// Cues of explicit escalation.
     static let escalatingCues = [
         "escalate", "escalated", "escalates", "escalating", "escalation", "intensified", "intensifies", "intensifying",
         "stepped up", "new offensive", "launched an offensive", "renewed fighting", "renewed attacks", "declared war",
         "retaliated", "retaliatory", "mobilized", "mobilised", "deployed additional", "state of emergency",
     ]
 
+    /// Cues of explicit de-escalation; a reversal right after one ("ceasefire collapsed") cancels it.
     static let deescalatingCues = [
         "ceasefire", "cease fire", "truce", "armistice", "peace talks", "peace deal", "peace agreement",
         "de escalation",
@@ -233,6 +266,8 @@ enum TensionEventClassifier {
         "collapsed", "collapses", "failed", "fails", "broke", "violated", "ended", "stalled", "faltered",
     ]
 
+    /// Classifies one event from its facts: the type with the most supporting facts (ties go to declaration order), the
+    /// largest reported figures and the escalation cues.
     static func classify(_ facts: [PassageAnchoredFact], methodology: TensionMethodology = .v1)
         -> TensionEventClassification
     {
@@ -304,7 +339,9 @@ enum TensionEventClassifier {
 /// at least 30", "the death toll rose to 1,200") and quantity words ("hundreds displaced"). Four-digit numbers from
 /// 1900 to 2099 written without separators are read as years and skipped.
 struct TensionFigures: Equatable, Sendable {
+    /// The largest death figure in the quote; 0 when none.
     private(set) var deaths = 0
+    /// The largest figure of people injured, displaced, evacuated, missing or otherwise harmed; 0 when none.
     private(set) var affected = 0
 
     private static let deathWords: Set<String> = ["killed", "dead", "died", "deaths", "fatalities", "killing", "kills"]
@@ -328,6 +365,7 @@ struct TensionFigures: Equatable, Sendable {
         "dozens": 24, "scores": 40, "hundreds": 200, "thousands": 2_000, "millions": 2_000_000,
     ]
 
+    /// Reads the largest figures from a quote.
     init(_ quote: String) {
         let text = quote.lowercased()
         let range = NSRange(text.startIndex..., in: text)
@@ -374,8 +412,11 @@ struct TensionFigures: Equatable, Sendable {
 
 /// A panel article as stored: the feed that delivered it and its event, if clustering grouped it.
 struct TensionCorpusRow: Sendable {
+    /// The stored article.
     let article: FeedArticle
+    /// The panel feed that delivered it.
     let feedURL: String
+    /// Its event; nil when clustering did not group it.
     let eventID: String?
 }
 
@@ -383,20 +424,29 @@ struct TensionCorpusRow: Sendable {
 struct TensionEventDay: Equatable, Sendable {
     /// The event ID, or the article ID of a story clustering did not group.
     let key: String
+    /// The event's panel articles published that day.
     let articleIDs: [String]
+    /// The panel feeds that carried them.
     let reporting: [TensionPanelMember]
+    /// The event's classification from those articles' facts.
     let classification: TensionEventClassification
 }
 
+/// One observation day's coverage and classified events, before scoring.
 struct TensionDayAssessment: Equatable, Sendable {
+    /// The methodology the day was assessed under.
     let methodologyVersion: Int
+    /// The UTC calendar day.
     let day: DateInterval
+    /// Which panel feeds reported that day.
     let coverage: TensionCoverage
+    /// Whether late items can still change the day.
     let isProvisional: Bool
     /// Unique events with panel coverage that day, in key order. Empty unless coverage is sufficient.
     let events: [TensionEventDay]
 }
 
+/// Turns the stored panel corpus of one day into a `TensionDayAssessment`.
 enum TensionDayAssessor {
     /// Classifies a day's unique events from the stored panel corpus. Articles outside the day or the panel are
     /// ignored, each event counts once however many outlets reported it, and no score is computed. With
@@ -449,14 +499,22 @@ enum TensionDayAssessor {
 
 /// Calibrated weights and parameters derived from the historical sample corpus (Issue #158).
 struct TensionWeights: Equatable, Codable, Sendable {
+    /// Base weight per event type.
     let typeWeights: [TensionEventType: Double]
+    /// Multiplier per death magnitude.
     let deathMultipliers: [TensionMagnitude: Double]
+    /// Multiplier per affected magnitude.
     let affectedMultipliers: [TensionMagnitude: Double]
+    /// Multiplier per escalation signal.
     let escalationMultipliers: [TensionEscalation: Double]
+    /// Multiplier by the number of panel regions that reported an event, 1 to 4 or more.
     let breadthMultipliers: [Int: Double]
+    /// The raw score at which the index reaches about 63 of 100.
     let scaleFactor: Double
+    /// The weight of the new day in the exponential smoothing of the index.
     let smoothingAlpha: Double
 
+    /// The weights calibrated for methodology v1.
     static let calibratedV1 = TensionWeights(
         typeWeights: [
             .armedConflict: 10.0,
@@ -497,12 +555,14 @@ struct TensionWeights: Equatable, Codable, Sendable {
         smoothingAlpha: 0.25
     )
 
+    /// The larger of the death and affected multipliers; 1 for a magnitude without an entry.
     func magnitudeMultiplier(deaths: TensionMagnitude, affected: TensionMagnitude) -> Double {
         let dMult = deathMultipliers[deaths] ?? 1.0
         let aMult = affectedMultipliers[affected] ?? 1.0
         return max(dMult, aMult)
     }
 
+    /// The multiplier for an event reported from this many panel regions; four or more share one value.
     func breadthMultiplier(regionCount: Int) -> Double {
         if regionCount <= 1 { return breadthMultipliers[1] ?? 0.85 }
         if regionCount == 2 { return breadthMultipliers[2] ?? 1.0 }
@@ -520,7 +580,9 @@ struct TensionWeights: Equatable, Codable, Sendable {
 
 /// Scoring breakdown for a single unique event on an observation day.
 struct TensionEventScore: Equatable, Sendable {
+    /// The event key the score belongs to.
     let key: String
+    /// Type weight times the magnitude, escalation and breadth multipliers; 0 for an event without a type.
     let rawScore: Double
     let typeWeight: Double
     let magnitudeMultiplier: Double
@@ -531,7 +593,9 @@ struct TensionEventScore: Equatable, Sendable {
 
 /// Scored evaluation of an observation day with raw, calibrated, and smoothed indices.
 struct TensionDayScore: Equatable, Sendable {
+    /// The UTC calendar day.
     let day: DateInterval
+    /// The day's coverage; only a sufficient day is scored.
     let coverageStatus: TensionCoverage.Status
     /// Nil when coverage is insufficient or noData: gaps are never zero.
     let rawDailyScore: Double?
@@ -539,12 +603,16 @@ struct TensionDayScore: Equatable, Sendable {
     let calibratedIndex: Double?
     /// Trailing 7-day EMA smoothing, or nil when coverage is insufficient.
     let smoothedIndex: Double?
+    /// Per-event scores; empty for an unscored day.
     let eventScores: [TensionEventScore]
+    /// Whether late items can still change the day.
     let isProvisional: Bool
 
 }
 
+/// Scores assessed days with `TensionWeights`.
 enum TensionCalibrator {
+    /// The event's raw score and the factors behind it.
     static func scoreEvent(_ event: TensionEventDay, weights: TensionWeights = .calibratedV1) -> TensionEventScore {
         guard let type = event.classification.type else {
             return TensionEventScore(
@@ -573,6 +641,8 @@ enum TensionCalibrator {
         )
     }
 
+    /// Scores a day: the sum of its event scores, scaled to 0 through 100 and smoothed with `previousSmoothedIndex`. A
+    /// day without sufficient coverage gets nil scores.
     static func scoreDay(
         assessment: TensionDayAssessment,
         previousSmoothedIndex: Double? = nil,
@@ -612,6 +682,7 @@ enum TensionCalibrator {
         )
     }
 
+    /// Scores the days in date order, smoothing each from the last scored day; gap days do not reset the smoothing.
     static func scoreSeries(
         assessments: [TensionDayAssessment],
         weights: TensionWeights = .calibratedV1
@@ -635,7 +706,9 @@ enum TensionCalibrator {
 /// One observation day as the tension view shows it: its score, coverage and the stories behind its largest
 /// contributions. Gap days keep a nil index.
 struct TensionHistoryDay: Sendable {
+    /// The day's score.
     let score: TensionDayScore
+    /// The day's coverage.
     let coverage: TensionCoverage
     /// Positive event contributions, largest first.
     let contributions: [TensionContribution]
@@ -643,12 +716,17 @@ struct TensionHistoryDay: Sendable {
 
 /// An event's share of a day's score, with the headline of one of its panel stories and what the classifier found.
 struct TensionContribution: Sendable {
+    /// The event's score.
     let score: TensionEventScore
+    /// The headline of one of the event's panel stories.
     let title: String
+    /// What the classifier found for the event.
     var classification: TensionEventClassification?
+    /// Panel feeds that reported the event that day.
     var reportingFeeds = 0
 }
 
+/// Builds the day-by-day history the tension view shows.
 enum TensionHistory {
     /// Scores the most recent `days` UTC days from the stored panel corpus. The series starts at the first day any
     /// panel feed reported, so without a historical corpus it starts on the day collection began; later days without
@@ -701,6 +779,7 @@ enum TensionLevel: String, CaseIterable, Sendable {
     case hot = "Hot"
     case boiling = "Boiling"
 
+    /// The band of an index: below 20 zen, below 40 mild, below 60 warm, below 80 hot, boiling from 80.
     init(index: Double) {
         switch index {
         case ..<20: self = .zen
@@ -722,23 +801,30 @@ enum TensionLevel: String, CaseIterable, Sendable {
 /// Everything a tension explanation may say: findings scoring already made, nothing else.
 /// The displayed paragraph is assembled directly from these facts, without model-generated claims.
 struct TensionBriefFacts: Hashable, Sendable {
+    /// One event behind the reading, as the explanation names it.
     struct Driver: Hashable, Sendable {
         let headline: String
         let type: TensionEventType?
         let deaths: TensionMagnitude
         let affected: TensionMagnitude
         let escalation: TensionEscalation
+        /// Panel feeds that reported the event.
         let reportingFeeds: Int
     }
 
+    /// The start of the reading's UTC day.
     let day: Date
+    /// The smoothed index in whole degrees.
     let degrees: Int
+    /// The band of the reading.
     let level: TensionLevel
     /// Whole degrees since the previous scored day; nil when it is the first.
     let change: Int?
     /// Mean 7-day reading over the scored days shown; nil with fewer than three.
     let typicalDegrees: Int?
+    /// Whether late items can still change the reading.
     let isProvisional: Bool
+    /// Up to three events with the largest contributions.
     let drivers: [Driver]
 
     /// The latest reading of a history, with up to three drivers; nil when no day is scored.
@@ -765,6 +851,7 @@ struct TensionBriefFacts: Hashable, Sendable {
 
     // MARK: Plain-language parts
 
+    /// The reading, its change from the previous day and its relation to the average, as one sentence.
     var readingSentence: String {
         var parts = ["News tension reads \(degrees)° (\(level.rawValue.lowercased()))"]
         if let change {
@@ -783,6 +870,7 @@ struct TensionBriefFacts: Hashable, Sendable {
         return parts.joined(separator: ", ") + "."
     }
 
+    /// The event type in plain words; "a reported incident" without a type.
     static func typePhrase(_ type: TensionEventType?) -> String {
         switch type {
         case .armedConflict: return "armed conflict"
@@ -807,6 +895,7 @@ struct TensionBriefFacts: Hashable, Sendable {
         }
     }
 
+    /// The escalation signal in plain words; nil without a signal.
     static func escalationPhrase(_ escalation: TensionEscalation) -> String? {
         switch escalation {
         case .noSignal: return nil

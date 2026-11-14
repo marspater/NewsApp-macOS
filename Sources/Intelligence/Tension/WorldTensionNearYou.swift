@@ -36,11 +36,17 @@ struct WorldTensionNearYou: Codable, Equatable, Sendable {
     let region: String
     /// The reading before this addition: the 7-day reading of methodology v3.
     let worldScore: Int
+    /// Degrees added for publishers that name the war next door with fighting or attacks.
     let neighbourDegrees: Int
+    /// Stories that counted toward `neighbourDegrees`.
     let neighbourStories: Int
+    /// Distinct publishers of those stories.
     let neighbourPublishers: Int
+    /// Degrees added for publishers that name the reader's country with a crisis, protest, attack or security cue.
     let domesticDegrees: Int
+    /// Stories that counted toward `domesticDegrees`.
     let domesticStories: Int
+    /// Distinct publishers of those stories.
     let domesticPublishers: Int
 
     /// The most the lens adds.
@@ -50,6 +56,7 @@ struct WorldTensionNearYou: Codable, Equatable, Sendable {
     /// Readings of this many days, today included, carry the lens; older ones show the world reading alone.
     static let shownDays = 30
 
+    /// The total the lens adds, at most `cap`.
     var degrees: Int { min(Self.cap, neighbourDegrees + domesticDegrees) }
 
     /// The sheet's sentences: what was counted, for each part that added something.
@@ -59,12 +66,14 @@ struct WorldTensionNearYou: Codable, Equatable, Sendable {
             "War next door +\(neighbourDegrees)°: \(Self.stories(neighbourStories)) from \(Self.publishers(neighbourPublishers)) this week name \(Self.neighbourNames) with fighting or attacks."
     }
 
+    /// The sheet's sentence for the domestic part; nil when it added nothing.
     var domesticReason: String? {
         guard domesticDegrees > 0 else { return nil }
         return
             "\(region) at home +\(domesticDegrees)°: \(Self.stories(domesticStories)) from \(Self.publishers(domesticPublishers)) this week name \(region) with a crisis, protest, attack or security cue."
     }
 
+    /// The sentences of the parts that added something, neighbour first.
     var reasons: [String] { [neighbourReason, domesticReason].compactMap { $0 } }
 
     private static let neighbourNames = "Ukraine, Belarus or Russia"
@@ -75,8 +84,11 @@ struct WorldTensionNearYou: Codable, Equatable, Sendable {
 
     /// A country the war in Ukraine is next door to, and the words that name it in a headline.
     struct Region: Equatable, Sendable {
+        /// The ISO region code the Mac's Region setting reports.
         let code: String
+        /// The country as the sheet names it.
         let name: String
+        /// Lowercased words that name the country in a headline.
         let words: [String]
 
         /// The region of the Mac's Region setting; nil where no such war is next door, and the lens adds nothing.
@@ -85,6 +97,7 @@ struct WorldTensionNearYou: Codable, Equatable, Sendable {
             return all.first { $0.code == code }
         }
 
+        /// The countries next door to the war in Ukraine that the lens covers.
         static let all: [Region] = [
             Region(code: "PL", name: "Poland", words: ["poland", "polish", "warsaw"]),
             Region(code: "LT", name: "Lithuania", words: ["lithuania", "lithuanian", "vilnius"]),
@@ -133,6 +146,7 @@ struct WorldTensionNearYou: Codable, Equatable, Sendable {
         }
     }
 
+    /// One step by publishers for the domestic part: 1 from one publisher, 2 from three, 3 from six.
     static func domesticDegrees(publishers: Int) -> Int {
         switch publishers {
         case 6...: return 3

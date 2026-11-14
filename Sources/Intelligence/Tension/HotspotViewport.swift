@@ -21,11 +21,16 @@ import Foundation
 /// proportions so a degree is as wide as it is tall, and the whole world when the places are spread across it. A
 /// handful of places in one theater would otherwise sit on top of each other on a map of the whole world.
 struct HotspotViewport: Equatable, Sendable {
+    /// The southern edge, in degrees.
     let minLatitude: Double
+    /// The northern edge, in degrees.
     let maxLatitude: Double
+    /// The western edge, in degrees.
     let minLongitude: Double
+    /// The eastern edge, in degrees.
     let maxLongitude: Double
 
+    /// The whole map.
     static let world = HotspotViewport(minLatitude: -90, maxLatitude: 90, minLongitude: -180, maxLongitude: 180)
     /// Degrees of room around the outermost marker, which covers its glow.
     static let padding = 10.0
@@ -55,6 +60,7 @@ struct HotspotViewport: Equatable, Sendable {
             maxLongitude: left + longitudeSpan)
     }
 
+    /// Whether the coordinate lies inside the viewport, edges included.
     func contains(_ coordinate: GeographicCoordinate) -> Bool {
         (minLatitude...maxLatitude).contains(coordinate.latitude)
             && (minLongitude...maxLongitude).contains(coordinate.longitude)
