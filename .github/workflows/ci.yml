@@ -1,12 +1,10 @@
 name: CI
 
 on:
+  # Every push to main starts the workflow; the `changes` job decides what it needs, with the same rule as for pull
+  # requests (script/ci_changes.sh).
   push:
     branches: [ main ]
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - 'LICENSE'
   # `closed` starts a run in the PR's concurrency group, which cancels its in-flight run
   # so merged PRs stop holding macOS runners; every job skips on that run.
   # The group keys on the PR number: a merged PR's `closed` run has `github.ref` set to
@@ -18,9 +16,12 @@ on:
     types: [ opened, synchronize, reopened, ready_for_review, closed ]
   workflow_dispatch:
 
+# A new push to a pull request cancels its older run. Runs on main queue instead: a cancelled main run has spent its
+# minutes and verified nothing (23 of 32 sampled test runs, 12 to 14 November). GitHub keeps one run going and one
+# waiting, and a newer push replaces the waiting run before it starts, so a burst of merges costs two runs.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -28,35 +29,52 @@ permissions:
 jobs:
   # `Changed paths` and both macOS jobs are required checks on main; the test job is the only macOS 26 runtime the
   # project has. So the workflow starts for every pull request and this job decides whether the macOS jobs have
-  # anything to test. A skipped job satisfies a required check; a workflow that never starts leaves it waiting. Same
-  # rule as the push filter above: Markdown, docs/ and LICENSE change nothing. If this job fails, the macOS jobs are
-  # skipped, and only its own failure blocks the merge.
+  # anything to test. A skipped job satisfies a required check; a workflow that never starts leaves it waiting.
+  # script/ci_changes.sh is the rule. If this job fails, the macOS jobs are skipped, and only
+  # its own failure blocks the merge.
   changes:
     name: Changed paths
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read  # script/ci_push_base.sh reads this workflow's finished runs on main
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      evaluation: ${{ steps.filter.outputs.evaluation }}
     steps:
       - name: Checkout Code
-        if: github.event_name == 'pull_request'
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Detect documentation-only changes
+      # A pull request against its merge base with its own base branch (the branch below it in a stack); a push
+      # against the last main commit this workflow finished on, so a waiting run that a newer push replaced is
+      # covered by the newer one. A manual run has no range and runs everything. A failing rule fails this required
+      # job instead of skipping the macOS jobs.
+      - name: Detect changes that cannot affect the app
         id: filter
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          code=true
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
-            if [ -z "$(echo "$changed" | grep -vE '(\.md$|^docs/|^LICENSE$)')" ]; then code=false; fi
-          fi
+          case "$GITHUB_EVENT_NAME" in
+            pull_request) base=$(git merge-base "$PR_BASE" "$PR_HEAD" || echo unknown); head=$PR_HEAD ;;
+            push) base=$(script/ci_push_base.sh ci.yml "$BEFORE"); head=$GITHUB_SHA ;;
+            *) base=unknown; head=$GITHUB_SHA ;;
+          esac
+          echo "Measured from $base"
+          code=$(script/ci_changes.sh "$base" "$head" '^\.github/workflows/ci\.yml$')
           echo "code=$code" >> "$GITHUB_OUTPUT"
+          evaluation=true
+          if changed=$(git diff --name-only "$base" "$head" 2>/dev/null) && ! grep -q '^script/evaluation/' <<< "$changed"; then
+            evaluation=false
+          fi
+          echo "evaluation=$evaluation" >> "$GITHUB_OUTPUT"
 
-  # macOS 26 runtime coverage (#663): CircleCI and Codemagic already run this suite on macOS 27 with Xcode 27.
+  # macOS 26 runtime coverage (#663): CircleCI (weekly) and Codemagic (release tags) run this suite on macOS 27 with
+  # Xcode 27.
   # The runner has no Xcode 27, so code built only with the macOS 27 SDK is left out here.
   test-arm64:
     name: Test (macOS 26, Apple Silicon)
@@ -94,25 +112,6 @@ jobs:
 
       - name: Run Unit Tests
         run: ./test.sh
-
-      - name: Test Editorial Evaluation Controls
-        run: python3 -m unittest discover -s script/evaluation -p 'test_editorial*.py'
-
-      - name: Run Phase 0 Editorial Matrix
-        run: |
-          python3 -m script.evaluation.editorial_matrix \
-            --database "$RUNNER_TEMP/editorial-phase0.sqlite3" \
-            --output "$RUNNER_TEMP/editorial-matrix.json"
-
-      - name: Upload Phase 0 Editorial Matrix
-        uses: actions/upload-artifact@v7
-        with:
-          name: editorial-phase0-matrix
-          path: |
-            ${{ runner.temp }}/editorial-matrix.json
-            ${{ runner.temp }}/editorial-phase0.sqlite3
-          if-no-files-found: error
-          retention-days: 14
 
       # Native Swift Testing target (#1070): the suites ported so far, alongside the runner's copies until parity, and
       # the publisher-excerpt checks that used to build NewsHarness here (#577).
@@ -153,6 +152,36 @@ jobs:
       - name: Verify Swift Package Manager Build
         run: swift build --force-resolved-versions --target News
 
+  # The Phase 0 editorial matrix is Python alone, so it runs on Linux: when the evaluation tooling changes and on
+  # every push to main. Its unit tests run with the other Python checks (script/python_checks.sh).
+  editorial-matrix:
+    name: Editorial Matrix
+    needs: changes
+    if: needs.changes.outputs.evaluation == 'true' || (github.event_name != 'pull_request' && needs.changes.outputs.code == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Run Phase 0 Editorial Matrix
+        run: |
+          python3 -m script.evaluation.editorial_matrix \
+            --database "$RUNNER_TEMP/editorial-phase0.sqlite3" \
+            --output "$RUNNER_TEMP/editorial-matrix.json"
+
+      - name: Upload Phase 0 Editorial Matrix
+        uses: actions/upload-artifact@v7
+        with:
+          name: editorial-phase0-matrix
+          path: |
+            ${{ runner.temp }}/editorial-matrix.json
+            ${{ runner.temp }}/editorial-phase0.sqlite3
+          if-no-files-found: error
+          retention-days: 14
+
   # Today edition captures on macOS 26 (#937): Tests/Harness/TodayCaptures.swift renders the card variants and the
   # page without a window, from fictional stories and drawn photos; the unsandboxed harness opens no library but an
   # empty one in the temporary directory. Pushes to main and manual runs only, so pull requests wait for nothing
@@ -160,7 +189,7 @@ jobs:
   today-captures:
     name: Today Captures (macOS 26, Apple Silicon)
     needs: changes
-    # `changes` reports code == 'true' for every push and manual run; only a pull request can report false.
+    # A push to main that changes nothing the app or its tests read reports code == 'false' and renders nothing.
     if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
     runs-on: macos-26
     env:

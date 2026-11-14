@@ -27,17 +27,7 @@ done
 if [[ $# -eq 0 && "$MODE" == "full" ]]; then
     script/design_lint.sh
     script/check_test_registry.sh
-    python3 script/evaluation/evaluate.py
-    python3 script/evaluation/publisher_review.py
-    python3 script/evaluation/publisher_dates.py
-    python3 script/evaluation/overview_review.py
-    python3 script/evaluation/importance_review.py
-    python3 script/evaluation/relation_review.py
-    python3 script/evaluation/lead_review.py
-    python3 script/evaluation/catalog_review.py
-    python3 script/evaluation/fit_pair_head.py
-    python3 script/evaluation/calibrate_tension.py
-    python3 script/training/pretrain_pairs.py --self-check
+    script/python_checks.sh
 fi
 
 # Content key of everything the Swift runner compiles or reads: the working tree (tracked and new files) without

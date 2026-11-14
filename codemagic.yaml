@@ -7,14 +7,15 @@ workflows:
       xcode: "27.0"
       vars:
         TARGET_MACOS: "15.0"
+    # The free plan's 500 macOS minutes a month cover about 16 runs of this workflow, so it no longer runs per pull
+    # request or push (GitHub Actions gates those, CircleCI tests main on Xcode 27). It verifies each release tag,
+    # the full suite and the release build on Xcode 27 and Apple silicon, and runs when started by hand.
     triggering:
       events:
-        - push
-        - pull_request
-      branch_patterns:
-        - pattern: main
+        - tag
+      tag_patterns:
+        - pattern: 'v*'
           include: true
-          source: false
       cancel_previous_builds: true
     # SwiftPM checkouts and dependency builds, as in the GitHub Actions and CircleCI caches.
     cache:
@@ -22,14 +23,6 @@ workflows:
         - $CM_BUILD_DIR/.build
         - $CM_BUILD_DIR/build/DerivedData/SourcePackages
         - $HOME/Library/Caches/org.swift.swiftpm
-    # Documentation-only changes need no macOS build (same rule as the GitHub workflow and CircleCI).
-    when:
-      changeset:
-        includes:
-          - '.'
-        excludes:
-          - 'docs/**'
-          - '**/*.md'
     scripts:
       - name: Verify Apple Silicon and toolchain
         script: |

@@ -1,22 +1,6 @@
 version: 2.1
 
 commands:
-  # Stops the macOS job early when the change cannot alter the app or its tests: documentation, changelog fragments,
-  # GitHub and Codemagic configuration, review-bot and linter configuration. Anything else runs, so an unknown
-  # path never skips a test. `.circleci/` is not on the list: a change to this pipeline must exercise it.
-  halt-unless-app-changed:
-    steps:
-      - run:
-          name: "Skip changes that cannot affect the app"
-          command: |
-            git fetch -q origin main || true
-            base=$(git merge-base HEAD FETCH_HEAD 2>/dev/null || true)
-            if [ -z "$base" ] || [ "$base" = "$(git rev-parse HEAD)" ]; then base=HEAD~1; fi
-            unaffecting='(\.md$|^docs/|^LICENSE$|^NOTICE$|^changelog/|^\.github/|^codemagic\.yaml$|^\.codacy|^\.coderabbit\.yaml$|^\.sonarcloud\.properties$|^\.claude/|^\.gitignore$)'
-            if changed=$(git diff --name-only "$base" HEAD) && [ -z "$(echo "$changed" | grep -vE "$unaffecting")" ]; then
-              echo "No app, test or pipeline file changed since $base; skipping."
-              circleci-agent step halt
-            fi
   prepare-macos:
     steps:
       - run:
@@ -37,20 +21,19 @@ jobs:
     steps:
       - checkout
       - run:
-          name: "Design lint, evaluation and testsuite self-checks (Swift formatting runs in GitHub Actions)"
+          name: "Design lint, Python tooling and CI script self-checks (Swift formatting runs in GitHub Actions)"
+          # The Python list is test.sh's, so a change to the tooling alone needs no macOS run anywhere.
           command: |
             script/design_lint.sh
-            for check in evaluate publisher_review publisher_dates overview_review importance_review relation_review catalog_review fit_pair_head; do
-              python3 "script/evaluation/$check.py"
-            done
+            script/python_checks.sh
             script/test_ci_testsuite.sh
+            script/test_ci_changes.sh
 
   test-macos:
     macos:
       xcode: "27.0"
     steps:
       - checkout
-      - halt-unless-app-changed
       - prepare-macos
       - run:
           name: "Run unit tests and regressions via Smarter Testing"
@@ -114,21 +97,32 @@ jobs:
           command: circleci run release update news-app --status=FAILED
           when: on_fail
 
+# The free plan's 30,000 credits a month buy about 144 minutes of the m4pro.medium macOS machine (208 credits a
+# minute). Running test-macos on every push to main still cost 72,393 credits on 12 and 13 November, so it runs only
+# in a scheduled pipeline (a weekly trigger on main, set in the project's Triggers settings) or one started by hand.
+# GitHub Actions gates every pull request and push; the commit hook runs the changed atoms on macOS 27 with Xcode 27.
 workflows:
+  # Every push: the Docker checks alone, a required check on main.
   build-and-test:
+    when:
+      and:
+        - not:
+            equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
+        - not:
+            equal: [ api, << pipeline.trigger_source >> ]
     jobs:
       - checks
-      # macOS credits: GitHub Actions runs the unit atoms, native tests, UI tests and package build on every pull
-      # request, so CircleCI's macOS job runs on main only. A pull request runs `checks` alone here.
+  # Scheduled or started by hand: the macOS suite on Xcode 27, then the release marker.
+  macos:
+    when:
+      or:
+        - equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
+        - equal: [ api, << pipeline.trigger_source >> ]
+    jobs:
+      - checks
       - test-macos:
           requires:
             - checks
-          filters:
-            branches:
-              only: main
       - deploy-marker:
           requires:
             - test-macos
-          filters:
-            branches:
-              only: main

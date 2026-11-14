@@ -1,23 +1,17 @@
 name: Security
 
+# No path filter on the workflow: a secret can sit in any file, documentation included. The `changes` job decides
+# which analyses have something to read.
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - 'LICENSE'
   # `closed` starts a run in the PR's concurrency group, which cancels its in-flight run
   # so merged PRs stop holding macOS runners; every job skips on that run.
   # The group keys on the PR number: a merged PR's `closed` run has `github.ref` set to
   # main, so a ref-keyed group would cancel main's run instead of the PR's.
+  # Every base branch, so the pull requests of a stack are scanned too.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, closed]
-    branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - 'LICENSE'
   schedule:
     - cron: "17 4 * * 1"
   workflow_dispatch:
@@ -25,18 +19,61 @@ on:
 permissions:
   contents: read
 
+# Pull requests cancel their older run; main queues, so its code scanning finishes instead of being cancelled by the
+# next merge (22 of 30 sampled Swift analyses on main were, 12 to 14 November).
 concurrency:
   group: security-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # What changed, against the pull request's merge base with its base branch, or for a push the last main commit
+  # this workflow finished on (a replaced waiting run is covered by the newer one). The weekly and manual runs
+  # analyse everything.
+  changes:
+    name: Security Paths
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read  # script/ci_push_base.sh reads this workflow's finished runs on main
+    outputs:
+      swift: ${{ steps.filter.outputs.swift }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Detect analysed paths
+        id: filter
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "$GITHUB_EVENT_NAME" in
+            pull_request) changed=$(git diff --name-only "$(git merge-base "$PR_BASE" "$PR_HEAD")" "$PR_HEAD") || changed=ALL ;;
+            push) changed=$(git diff --name-only "$(script/ci_push_base.sh security.yml "$BEFORE")" "$GITHUB_SHA") || changed=ALL ;;
+            *) changed=ALL ;;
+          esac
+          # What `swift build --target News` compiles, and this workflow.
+          grep -Eq '^(ALL$|Sources/|BuildSupport/|Package\.(swift|resolved)$|\.github/workflows/security\.yml$)' <<< "$changed" \
+            && echo swift=true >> "$GITHUB_OUTPUT" || echo swift=false >> "$GITHUB_OUTPUT"
+          grep -Eq '^(ALL$|\.github/(workflows|actions)/)' <<< "$changed" \
+            && echo workflows=true >> "$GITHUB_OUTPUT" || echo workflows=false >> "$GITHUB_OUTPUT"
+
+  # The traced build takes 19 to 41 minutes, so it runs only when Swift the app compiles changed.
   codeql:
     name: CodeQL (Swift)
-    if: github.event.action != 'closed' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    needs: changes
+    if: needs.changes.outputs.swift == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     permissions:
       contents: read
       security-events: write
-    # Keep extraction on a supported stable toolchain; normal CI tests Xcode 27.
+    # Extraction stays on a toolchain the CodeQL Swift extractor supports, which can trail the 26.6 that ci.yml
+    # tests with and the Xcode 27 it builds with.
     runs-on: macos-26
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
@@ -73,7 +110,8 @@ jobs:
 
   codeql-actions:
     name: CodeQL (Actions)
-    if: github.event.action != 'closed'
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
     permissions:
       contents: read
       security-events: write
@@ -123,14 +161,3 @@ jobs:
         uses: trufflesecurity/trufflehog@ea68ca03c865c5f324e86e849ced20ed3cf9dbbb # v3.99.8
         with:
           extra_args: --results=verified,unknown
-
-  swift-security-tests:
-    name: Swift Security Tests
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: xcode-27
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-      - name: Run security-focused test suite
-        run: ./test.sh
