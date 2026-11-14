@@ -23,6 +23,7 @@ public struct GenerationPromptDefense: Sendable {
 
     /// Standard delimiter tags for untrusted data containment.
     public static let sourceDataStartTag = "<source_data>"
+    /// The closing tag that pairs with `sourceDataStartTag`.
     public static let sourceDataEndTag = "</source_data>"
 
     /// Canonical system prompt guard instructing the model to treat content within boundaries strictly as untrusted data.

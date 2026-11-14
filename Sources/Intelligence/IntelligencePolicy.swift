@@ -20,6 +20,7 @@ import Foundation
 /// Tension pause in Low Power Mode and from the serious thermal state on; clustering runs with the rules alone and
 /// defers what its models would have decided (#534). Every caller used to carry its own copy.
 enum IntelligencePolicy {
+    /// False in Low Power Mode or from the serious thermal state on; true otherwise.
     static func allowsEnergy(_ info: ProcessInfo = .processInfo) -> Bool {
         !info.isLowPowerModeEnabled && info.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
     }

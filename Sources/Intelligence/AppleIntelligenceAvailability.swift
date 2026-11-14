@@ -25,14 +25,22 @@ import os
 
 /// The state of on-device Apple Intelligence across system and app settings (#1212).
 public enum AppleIntelligenceState: String, CaseIterable, Equatable, Sendable {
+    /// The on-device model can answer.
     case ready
+    /// The reader turned AI story analysis off in the app.
     case appDisabled
+    /// Apple Intelligence is off in System Settings.
     case systemDisabled
+    /// The model is not ready yet, for example while it downloads.
     case modelDownloading
+    /// The model is unavailable for a reason not otherwise classified; analysis retries after the next refresh.
     case temporarilyBusy
+    /// This Mac cannot run Apple Intelligence, or the build lacks FoundationModels.
     case unsupportedDevice
+    /// The system is older than macOS 26.
     case macOSVersionTooOld
 
+    /// True only for `ready`.
     public var isAvailable: Bool { self == .ready }
 
     /// Short status label for headings, status pills and diagnostic reports.
@@ -117,6 +125,7 @@ public enum AppleIntelligenceState: String, CaseIterable, Equatable, Sendable {
 @MainActor
 @Observable
 public final class AppleIntelligenceAvailability {
+    /// The app-wide instance the feature surfaces read.
     public static let shared = AppleIntelligenceAvailability()
 
     private static let logger = Logger(subsystem: "com.marspater.news", category: "AppleIntelligenceAvailability")
@@ -124,6 +133,7 @@ public final class AppleIntelligenceAvailability {
     /// Injected mock state for unit and regression testing.
     public var mockState: AppleIntelligenceState?
 
+    /// Creates an instance with no mock state, so `state` reads the live settings and model.
     public init() {}
 
     /// Current availability state combining app settings, OS version and FoundationModels availability.

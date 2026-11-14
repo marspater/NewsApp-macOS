@@ -18,9 +18,13 @@ import Foundation
 
 /// One forward-looking line a publisher stated, in the publisher's words. The app schedules nothing.
 struct ForwardWatchItem: Equatable, Hashable, Sendable {
+    /// How firmly the publisher states the item; the raw value orders the module, scheduled first.
     enum Kind: Int, Sendable, Comparable {
+        /// `scheduled`: a stated date with scheduling language; `expected`: an expectation or vague time ahead;
+        /// `conditional`: it depends on something else happening.
         case scheduled, expected, conditional
 
+        /// The section heading for the kind.
         var title: String {
             switch self {
             case .scheduled: return "Scheduled"
@@ -32,18 +36,23 @@ struct ForwardWatchItem: Equatable, Hashable, Sendable {
         static func < (lhs: Kind, rhs: Kind) -> Bool { lhs.rawValue < rhs.rawValue }
     }
 
+    /// How firmly the publisher states the item.
     let kind: Kind
     /// The cited sentence, trimmed.
     let text: String
     /// The date exactly as written in `text`; nil when the sentence states none. Never inferred.
     let dateText: String?
+    /// The cited source's name; nil when the citation names none.
     let publisher: String?
+    /// The citation the sentence was read from.
     let citationID: String?
 }
 
 /// Scheduled, expected and conditional items stated in cited passages, in the publisher's words (#851). Sentence
 /// segmentation, regex anchors and keyword lists, no model.
 enum ForwardWatchExtractor {
+    /// The most distinct sentences `extract(facts:citations:publishedAt:now:)` returns; further publishers of a kept
+    /// sentence do not count against it.
     static let maximumItems = 6
 
     /// Reads cited passages. Publication resolves partial dates; `now` determines whether the date has passed.
