@@ -99,7 +99,6 @@ extension Notification.Name {
 
 /// The app's scenes and menu commands, with the shared stores in the environment.
 struct NewsApp: App {
-    /// The delegate that handles launch, termination, Quick Look and notification responses.
     @FocusedValue(\.archiveSearch) private var archiveSearch
     @FocusedValue(\.selectedStory) private var selectedStory
     @FocusedValue(\.readerActions) private var readerActions
@@ -107,6 +106,7 @@ struct NewsApp: App {
     @FocusedValue(\.listActions) private var listActions
     @FocusedValue(\.addFeedSubscription) private var addFeedSubscription
     @Environment(\.openWindow) private var openWindow
+    /// The delegate that handles launch, termination, Quick Look and notification responses.
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appContainer = AppContainer.shared
     @StateObject private var appSettings = AppSettings.shared

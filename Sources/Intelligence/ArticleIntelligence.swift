@@ -287,7 +287,7 @@ public struct NewsTextModel: Sendable {
     /// the macOS build identifies it; an update that keeps the model only causes one extra regeneration.
     public static var generation: String { ProcessInfo.processInfo.operatingSystemVersionString }
 
-    /// A model that always throws `URLError(.resourceUnavailable)`, so every caller takes its final deterministic path.
+    /// A model that always throws `URLError(.resourceUnavailable)`; each caller decides whether its fallback is final.
     public static let unavailable = NewsTextModel { _, _ in throw URLError(.resourceUnavailable) }
     /// The system language model with permissive content-transformation guardrails and greedy sampling, a fresh session
     /// per request.

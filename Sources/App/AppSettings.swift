@@ -147,9 +147,9 @@ final class AppSettings: ObservableObject {
 
     private let defaults: UserDefaults
 
-    /// The sidebar sections, including imported OPML folders.
     /// The subscribed feed URLs, normalized, in subscription order.
     @Published var feedURLs: [String]
+    /// The sidebar sections, including imported OPML folders.
     @Published var userSections: [String]
     /// Explicit OPML section membership, distinct from keyword/category sections; persisted with subscriptions.
     @Published private(set) var opmlFolderFeeds: [String: [String]]

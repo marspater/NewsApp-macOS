@@ -97,9 +97,10 @@ actor EditorialPersonalization {
 
     /// Opens the store at `path`, or in memory when nil, and expires impressions older than 30 days.
     ///
-    /// A new file is created exclusively with owner-only permissions; an existing one must be a regular file holding a
-    /// store for the same `modelVersion`, or `PersonalizationError.foreignDatabase` is thrown. Throws
-    /// `PersonalizationError.invalidPolicy` for a policy outside its ranges or an empty model version.
+    /// A new file is created exclusively with owner-only permissions. An existing file that is not a regular file
+    /// holding a recognized store throws `PersonalizationError.foreignDatabase`; a store made for another
+    /// `modelVersion` throws `PersonalizationError.invalidInput`. Throws `PersonalizationError.invalidPolicy` for a
+    /// policy outside its ranges or an empty model version.
     init(
         policy: PersonalizationPolicy, modelVersion: String, path: String? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
