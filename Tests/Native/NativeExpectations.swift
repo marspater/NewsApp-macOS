@@ -78,6 +78,7 @@ extension Tag {
     @Tag static var cancellation: Self
     @Tag static var clustering: Self
     @Tag static var intelligence: Self
+    @Tag static var lifecycle: Self
     @Tag static var socket: Self
     /// Every suite the Integration test plan runs: a plan's tag list selects only tests carrying all of its tags.
     @Tag static var integration: Self
