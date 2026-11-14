@@ -59,6 +59,9 @@ struct NotificationDelivery: Sendable {
         // Without a library the story is shown as it came.
         story
     }
+    /// Asks the existing image worker to prioritize a story; false means no lookup can start.
+    var prioritizeImage: @Sendable (String) async -> Bool = { _ in false }
+    var withdrawImagePriority: @Sendable (String) async -> Void = { _ in }
     /// Called after each banner posts, so the pass records it before the next.
     var record: @Sendable (PlannedBanner) async -> Void = { _ in
         // Without a library (tests, summary modes) there is nothing to record.
@@ -472,7 +475,27 @@ final class NotificationService: Sendable {
                 }
                 guard !Task.isCancelled else { break }
                 var banner = banner
-                if let story = banner.article { banner.article = await delivery.curated(story) }
+                if let story = banner.article {
+                    var curated = await delivery.curated(story)
+                    if index == 0, FeedArticle.attachmentImages(for: curated).isEmpty {
+                        guard await delivery.continues(), !Task.isCancelled else { return }
+                        if await delivery.prioritizeImage(story.id) {
+                            let clock = ContinuousClock()
+                            let deadline = clock.now.advanced(by: .seconds(2))
+                            while !Task.isCancelled, clock.now < deadline {
+                                do { try await Task.sleep(for: .milliseconds(100)) } catch { break }
+                                guard await delivery.continues() else {
+                                    await delivery.withdrawImagePriority(story.id)
+                                    return
+                                }
+                                curated = await delivery.curated(story)
+                                if !FeedArticle.attachmentImages(for: curated).isEmpty { break }
+                            }
+                            await delivery.withdrawImagePriority(story.id)
+                        }
+                    }
+                    banner.article = curated
+                }
                 let outcome = await triggerFullNotification(banner, at: delivery.now, continues: delivery.continues)
                 // A halt is final: the pass must not wait out another gap and post its old banners once Full is back.
                 if outcome == .halted { break }

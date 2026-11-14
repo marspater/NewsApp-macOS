@@ -82,8 +82,11 @@ class FeedManager: NSObject, ObservableObject {
     /// The entity index and co-reporting graph (W2 #716), read in the background after clustering; one pass at a time.
     private var entityIndexTask: Task<Void, Never>?
     private var entityIndexRunID: UUID?
-    /// Publisher-page lead images, looked up after clustering so notifications never wait for page downloads.
-    private var imageLookupTask: Task<Void, Never>?
+    /// Publisher-page lead images, looked up after clustering on a separate task.
+    private(set) var imageLookupTask: Task<Void, Never>?
+    private var imageLookupDraining: Task<Void, Never>?
+    private var imageLookupRunID: UUID?
+    let imagePriority = StoryImagePriority()
     /// The stories the running lookup was handed, which a cancelled lookup gives back to the pending ones.
     private var runningImageIDs: [String] = []
     private var imagePriorityIDs: [String] = []
@@ -849,6 +852,11 @@ class FeedManager: NSObject, ObservableObject {
                     await self?.allowsFullBanners() ?? false
                 }
                 delivery.curated = { story in (try? await database.curateImages(in: [story]))?.first ?? story }
+                delivery.prioritizeImage = { [weak self] id in
+                    await self?.prioritizeBannerImage(id) ?? false
+                }
+                let priority = imagePriority
+                delivery.withdrawImagePriority = { id in await priority.withdraw(id) }
                 delivery.record = { [weak self] banner in
                     // A banner is counted only after its bookkeeping write succeeds.
                     let at = banner.lane == .starred ? posted : (await self?.currentDate() ?? posted)
@@ -1110,7 +1118,7 @@ class FeedManager: NSObject, ObservableObject {
     }
 
     /// Looks up lead images for shown stories without any, after clustering and outside `waitForEventClustering`, so
-    /// notification triage never waits for publisher pages. A later pass replaces a lookup still running.
+    /// notification triage may briefly wait for the first banner's image. A later pass replaces a lookup still running.
     /// Stories on screen without a photo (the Today edition's top): the next lookup starts with them, and one starts
     /// now when none is running and a story is asked for the first time. A story is asked for once a session, so a
     /// page that cannot be read does not start a lookup each time the list reloads.
@@ -1130,16 +1138,31 @@ class FeedManager: NSObject, ObservableObject {
     /// cannot take the budget again and keep the deferred ones out.
     /// Cancels the running lookup. A lookup cut short before it asked for its stories leaves them pending, also when
     /// no replacement can start (background work is not allowed).
-    private func cancelImageLookup() {
-        guard let task = imageLookupTask else { return }
+    @discardableResult
+    private func cancelImageLookup() -> Task<Void, Never>? {
+        guard let task = imageLookupTask else { return imageLookupDraining }
         task.cancel()
+        imageLookupDraining = task
         imageLookupTask = nil
         requestedImageIDs.subtract(runningImageIDs)
         runningImageIDs = []
+        imageLookupRunID = nil
+        return task
+    }
+
+    func prioritizeBannerImage(_ id: String) async -> Bool {
+        guard !isStopped, imageFinder.isAvailable, allowsBackgroundWork() else { return false }
+        await imagePriority.request(id)
+        guard !Task.isCancelled else {
+            await imagePriority.withdraw(id)
+            return false
+        }
+        if imageLookupTask == nil { lookUpStoryImages() }
+        return true
     }
 
     private func lookUpStoryImages(pendingOnly: Bool = false) {
-        cancelImageLookup()
+        let previous = cancelImageLookup()
         guard !isStopped, imageFinder.isAvailable, allowsBackgroundWork() else { return }
         let database = articleStore.database
         let finder = imageFinder
@@ -1149,11 +1172,18 @@ class FeedManager: NSObject, ObservableObject {
         // Handed to this lookup; a lookup that could not start (the guard above) leaves them pending.
         requestedImageIDs.formUnion(first)
         runningImageIDs = first
+        let priority = imagePriority
+        let runID = UUID()
+        imageLookupRunID = runID
         imageLookupTask = Task { [weak self] in
+            await previous?.value
+            guard !Task.isCancelled else { return }
             self?.logger.info("Story image lookup started")
             defer { self?.logger.info("Story image lookup finished") }
             let work = Task.detached(priority: .utility) {
-                try await StoryCurator.run(in: database, imageFinder: finder, muting: muting, first: first) {
+                try await StoryCurator.run(
+                    in: database, imageFinder: finder, muting: muting, first: first, priority: priority
+                ) {
                     Task { @MainActor in
                         store.noteStoryImageSaved()
                     }
@@ -1164,7 +1194,7 @@ class FeedManager: NSObject, ObservableObject {
             } onCancel: {
                 work.cancel()
             }
-            guard let self else { return }
+            guard let self, self.imageLookupRunID == runID else { return }
             // Stories the budget skipped stay pending for the next lookup. A lookup cancelled since may share its
             // stories with its replacement, which owns them now.
             if !Task.isCancelled, case .success(let report) = result {
@@ -1172,9 +1202,13 @@ class FeedManager: NSObject, ObservableObject {
             }
             if !Task.isCancelled {
                 self.imageLookupTask = nil
+                self.imageLookupRunID = nil
                 self.runningImageIDs = []
                 // Stories asked for while this lookup ran get their own.
                 self.startRequestedImageLookup()
+                if case .success = result, await priority.hasPending, self.imageLookupTask == nil, !self.isStopped {
+                    self.lookUpStoryImages()
+                }
             }
             switch result {
             case .success(let report):
