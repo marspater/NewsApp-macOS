@@ -1,0 +1,304 @@
+// Copyright 2026 Mars Pater
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+import AppIntents
+import AppKit
+import CryptoKit
+import Darwin
+import Foundation
+import ImageIO
+import NaturalLanguage
+import Network
+import PDFKit
+import SQLite3
+import SwiftUI
+import Testing
+import UniformTypeIdentifiers
+import UserNotifications
+import WebKit
+import dnssd
+
+#if canImport(FoundationModels)
+    import FoundationModels
+#endif
+
+/// Native port of the `BriefingIntelligenceTests` atom (#1070): the same 7 tests, in the runner's order, with each
+/// `check` turned into `expectTrue` of NativeExpectations.swift (the runner log is invisible to Swift Testing), so a
+/// failure is recorded and later tests still run. The atom's closing summary is not a test and stays in the runner. The
+/// runner keeps its copy until CI shows parity.
+extension NativeSuites {
+    @Suite(.tags(.briefing, .integration)) struct BriefingIntelligenceSuite {
+        @Test func sitrepSaveRefusedWhenStale() async { await Self.testSitrepSaveRefusedWhenStale() }
+        @Test func snapshotDiffAcrossEditions() async { await Self.testSnapshotDiffAcrossEditions() }
+        @Test @MainActor func cancelledBriefingSnapshot() async { await Self.testCancelledBriefingSnapshot() }
+        @Test func momentum() { Self.testMomentum() }
+        @Test func originalReports() { Self.testOriginalReports() }
+        @Test func footprintGrouping() { Self.testFootprintGrouping() }
+        @Test func sitrepComposerFallsBack() async { await Self.testSitrepComposerFallsBack() }
+    }
+}
+
+extension NativeSuites.BriefingIntelligenceSuite {
+
+    static func overview(version: Int, facts: [String]) -> EventOverviewDocument {
+        EventOverviewDocument(
+            eventID: "event-1",
+            version: OverviewVersionContext(membershipVersion: version, inputTextHash: "input-\(version)"),
+            content: OverviewContent(
+                title: "Corridor", summary: "",
+                facts: facts.enumerated().map { OverviewFact(id: "f\($0.offset)", text: $0.element, citationIDs: []) },
+                citations: []),
+            provenance: OverviewProvenance(memberArticleIDs: ["a1"], kind: .fallbackExcerpts))
+    }
+
+    static func testSitrepSaveRefusedWhenStale() async {
+        let db = DatabaseEngine(path: ":memory:")
+        do {
+            try await db.open()
+            let first = overview(version: 1, facts: ["Port authorities raised the security level."])
+            expectTrue(try await db.recordEventOverview(first), "Stores the first overview")
+            _ = try await db.upsertArticles([BriefingTestFactory.makeArticle(id: "a1", title: "Corridor")])
+            let hash = DatabaseEngine.briefingSitrepInputHash(eventID: "event-1", title: "Corridor", overview: first)
+            let renamed = DatabaseEngine.briefingSitrepInputHash(eventID: "event-1", title: "Renamed", overview: first)
+            expectTrue(
+                try await !db.saveBriefingSitrep(
+                    eventID: "event-1", articleID: "a1", inputHash: renamed, text: "Line", isGenerated: true),
+                "A line made under a headline the stored article no longer has is refused")
+            expectTrue(
+                try await db.saveBriefingSitrep(
+                    eventID: "event-1", articleID: "a1", inputHash: hash, text: "Line", isGenerated: true),
+                "A sitrep line made from the current overview is saved")
+            expectTrue(
+                try await db.fetchBriefingSitrep(eventID: "event-1")?.text == "Line", "The saved line reads back")
+            let second = overview(version: 2, facts: ["Port authorities raised the security level."])
+            expectTrue(try await db.recordEventOverview(second), "Stores the newer overview")
+            expectTrue(
+                try await !db.saveBriefingSitrep(
+                    eventID: "event-1", articleID: "a1", inputHash: hash, text: "Stale", isGenerated: true),
+                "A line made from an older overview version is refused")
+            expectTrue(
+                try await db.fetchBriefingSitrep(eventID: "event-1")?.text == "Line",
+                "The refused save leaves the cache unchanged")
+            await db.close()
+        } catch {
+            expectTrue(false, "Sitrep stamp test threw \(error)")
+        }
+    }
+
+    static func testSnapshotDiffAcrossEditions() async {
+        let db = DatabaseEngine(path: ":memory:")
+        do {
+            try await db.open()
+            let monday = Date(timeIntervalSince1970: 1_790_000_000)
+            let tuesday = monday.addingTimeInterval(86_400)
+            let old = [
+                BriefingEditionSnapshotRow(eventID: "a", membershipVersion: 1, publisherCount: 3, escalation: nil),
+                BriefingEditionSnapshotRow(eventID: "b", membershipVersion: 1, publisherCount: 2, escalation: nil),
+            ]
+            try await db.saveBriefingSnapshot(startedAt: monday, rows: old)
+            try await db.saveBriefingSnapshot(startedAt: monday, rows: old)
+            expectTrue(try await db.latestBriefingSnapshot(before: monday) == nil, "No edition precedes the first")
+            let current = [
+                BriefingSinceLastData.Current(
+                    snapshot: BriefingEditionSnapshotRow(
+                        eventID: "a", membershipVersion: 2, publisherCount: 6, escalation: nil), title: "Corridor"),
+                BriefingSinceLastData.Current(
+                    snapshot: BriefingEditionSnapshotRow(
+                        eventID: "b", membershipVersion: 1, publisherCount: 2, escalation: "deescalating"),
+                    title: "Border"),
+                BriefingSinceLastData.Current(
+                    snapshot: BriefingEditionSnapshotRow(
+                        eventID: "c", membershipVersion: 1, publisherCount: 2, escalation: nil), title: "Ports"),
+            ]
+            try await db.saveBriefingSnapshot(startedAt: tuesday, rows: current.map(\.snapshot))
+            guard let previous = try await db.latestBriefingSnapshot(before: tuesday) else {
+                expectTrue(false, "The earlier edition is found")
+                return
+            }
+            expectTrue(previous.startedAt == monday, "The previous edition is Monday's")
+            expectTrue(previous.rows.count == 2, "Saving an edition twice keeps one row per event")
+            let empty = tuesday.addingTimeInterval(-3600)
+            try await db.saveBriefingSnapshot(startedAt: empty, rows: [])
+            let emptyPrevious = try await db.latestBriefingSnapshot(before: tuesday)
+            expectTrue(
+                emptyPrevious?.startedAt == empty && emptyPrevious?.rows.isEmpty == true,
+                "An edition without events is still the previous edition")
+            try await db.eventRows(
+                "DELETE FROM briefing_edition_snapshots WHERE edition_started_at = ?;",
+                [.real(empty.timeIntervalSince1970)])
+            let rows = BriefingSinceLastData.changes(
+                previous: previous.rows, previousAt: previous.startedAt, current: current)
+            expectTrue(
+                rows.map(\.kind) == [.newEvent, .moreCoverage, .easing],
+                "Rows are new event, more coverage, easing: \(rows.map(\.kind))")
+            expectTrue(rows.first?.text == "Ports", "The new event is the one missing from Monday")
+            expectTrue(
+                rows.dropFirst().first?.meta.hasPrefix("+3 publishers since") == true, "More coverage counts the gain")
+            expectTrue(
+                BriefingSinceLastData.changes(
+                    previous: current.map(\.snapshot), previousAt: tuesday, current: current
+                ).isEmpty, "An unchanged edition yields no rows")
+            await db.close()
+        } catch {
+            expectTrue(false, "Snapshot test threw \(error)")
+        }
+    }
+
+    @MainActor
+    static func testCancelledBriefingSnapshot() async {
+        let db = DatabaseEngine(path: ":memory:")
+        do {
+            try await db.open()
+            let editionStart = Date(timeIntervalSince1970: 1_790_000_000)
+            let context = BriefingLoadContext(
+                entries: [], heroIDs: [], briefing: FiniteBriefing(startedAt: editionStart, articles: []),
+                now: editionStart, tension: WorldTensionState(), readIDs: [], previousEditionStartedAt: nil)
+            let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+            let ignored = await Task { @MainActor in
+                withUnsafeCurrentTask { $0?.cancel() }
+                return await BriefingSinceLastData.load(context, store: store)
+            }.value
+            expectTrue(ignored == nil, "A cancelled Since Last load yields no stale result")
+            expectTrue(
+                try await db.latestBriefingSnapshot(before: editionStart.addingTimeInterval(3600)) == nil,
+                "Cancelled board loads leave the edition snapshot unchanged")
+            let rejected = await Task {
+                withUnsafeCurrentTask { $0?.cancel() }
+                do {
+                    try await db.saveBriefingSnapshot(startedAt: editionStart, rows: [])
+                    return false
+                } catch is CancellationError {
+                    return true
+                } catch {
+                    return false
+                }
+            }.value
+            expectTrue(rejected, "Storage refuses a cancelled snapshot write")
+            expectTrue(
+                try await db.latestBriefingSnapshot(before: editionStart.addingTimeInterval(3600)) == nil,
+                "Cancelled snapshot transactions do not commit")
+        } catch {
+            expectTrue(false, "Cancelled snapshot regression failed: \(error)")
+        }
+    }
+
+    static func testMomentum() {
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        func hoursAgo(_ hours: [Double]) -> [Date] { hours.map { now.addingTimeInterval(-$0 * 3600) } }
+        expectTrue(
+            BriefingPriorityData.momentum(dates: hoursAgo([1, 2, 3, 8]), now: now) == .rising, "More recent: rising")
+        expectTrue(BriefingPriorityData.momentum(dates: hoursAgo([1, 7]), now: now) == .steady, "Equal halves: steady")
+        expectTrue(
+            BriefingPriorityData.momentum(dates: hoursAgo([2, 7, 9, 11]), now: now) == .fading, "Fewer recent: fading")
+        expectTrue(
+            BriefingPriorityData.momentum(dates: hoursAgo([13, 20]), now: now) == .steady, "Old reports only: steady")
+    }
+
+    static func testOriginalReports() {
+        let reports: [(publisher: String, text: String)] = [
+            ("Reuters", "LONDON (Reuters) - Ports raised security."),
+            ("The Guardian", "Our correspondent saw ships turned back."),
+            ("Daily Example", "LONDON (Reuters) - Ports raised security."),
+            ("Daily Example", "(Reuters) - Insurers raised premiums."),
+            ("Other Times", "Officials met on Monday."),
+        ]
+        expectTrue(
+            BriefingPriorityData.originalReports(reports) == 3,
+            "A wire agency's own report counts; a paper running only wire copy does not")
+        expectTrue(BriefingPriorityData.isWireCopy(text: "(AP) - Text", publisher: "Daily Example"), "AP copy is wire")
+        let body = String(repeating: "Our correspondent reports from the port. ", count: 8)
+        expectTrue(
+            !BriefingPriorityData.isWireCopy(
+                text: body + "Reuters reported a similar figure.", publisher: "Daily Example"),
+            "A body mention of Reuters stays original")
+        expectTrue(
+            BriefingPriorityData.isWireCopy(text: "LONDON (Reuters) – " + body, publisher: "Daily Example"),
+            "A leading Reuters credit is wire copy")
+        expectTrue(
+            !BriefingPriorityData.isWireCopy(text: "(Reuters) - Text", publisher: "Reuters"), "Reuters is original")
+    }
+
+    static func testFootprintGrouping() {
+        guard
+            let global = FeedCatalog.allFeeds.first(where: {
+                $0.region == "global"
+                    && OverviewPerspectivesExtractor.detectWireSource(in: "", articleSource: $0.publisher) == nil
+            })?.publisher,
+            let british = FeedCatalog.allFeeds.first(where: { $0.region == "GB" })?.publisher
+        else {
+            expectTrue(false, "The catalog holds a global and a British publisher")
+            return
+        }
+        let data = BriefingFootprintData.make([
+            (global, "Ships turned back."), (british, "AFP - Ships turned back."), (british, "Second report."),
+            ("Reuters", "Ships turned back."), ("Unknown Gazette", "Ships turned back."),
+        ])
+        let groups = Dictionary(uniqueKeysWithValues: data.groups.map { ($0.label, $0.count) })
+        expectTrue(data.publisherCount == 4, "Publishers count once each")
+        expectTrue(groups["International"] == 1, "A global publisher is International: \(groups)")
+        expectTrue(groups["Europe"] == 1, "A British publisher goes by its continent: \(groups)")
+        expectTrue(groups[BriefingFootprintData.wireAgencies] == 1, "Reuters is a wire agency: \(groups)")
+        expectTrue(groups["Other"] == 1, "A publisher outside the catalog is Other: \(groups)")
+        expectTrue(data.wireCopyCount == 0, "A publisher with one original report is not wire copy")
+        expectTrue(data.originalCount == 4, "Every publisher has an original report")
+    }
+
+    static func testSitrepComposerFallsBack() async {
+        let highlights = [
+            BriefingSitrepComposer.Highlight(text: "Port authorities raised the security level.", publisher: "Reuters")
+        ]
+        let invented = NewsTextModel { _, _ in "Port authorities in Rotterdam raised the security level for vessels." }
+        let invent = await BriefingSitrepComposer.compose(title: "Corridor", highlights: highlights, model: invented)
+        expectTrue(invent?.isGenerated == false, "A sentence naming something the inputs lack falls back")
+        expectTrue(invent?.text == highlights[0].text, "The fallback is the first highlight")
+        let figure = NewsTextModel { _, _ in "Port authorities raised the security level to 3, Reuters reports." }
+        let numbered = await BriefingSitrepComposer.compose(title: "Corridor", highlights: highlights, model: figure)
+        expectTrue(numbered?.isGenerated == false, "A sentence with an invented figure falls back")
+        expectTrue(numbered?.isFinal == true, "A rejected model answer is cached as the highlight")
+        let off = await BriefingSitrepComposer.compose(title: "Corridor", highlights: highlights, model: .unavailable)
+        expectTrue(off?.isFinal == false, "A line made with the model off is not cached")
+        let negated = [
+            BriefingSitrepComposer.Highlight(text: "Officials denied that ships were damaged.", publisher: nil)
+        ]
+        let dropped = await BriefingSitrepComposer.compose(
+            title: "Corridor", highlights: negated,
+            model: NewsTextModel { _, _ in "Officials said that ships were damaged in the corridor." })
+        expectTrue(dropped?.isGenerated == false, "A sentence that drops the facts' negation falls back")
+        expectTrue(
+            BriefingSitrepComposer.keepsQualifiers("Officials denied damage.", facts: [negated[0].text]),
+            "A sentence keeping the negation passes")
+        expectTrue(
+            !BriefingSitrepComposer.keepsQualifiers(
+                "Officials confirmed damage to the port.", facts: ["Officials didn\u{2019}t confirm any damage."]),
+            "A contraction counts as negation")
+        expectTrue(
+            !BriefingSitrepComposer.keepsQualifiers("Ships were damaged.", facts: ["Officials cannot confirm damage."]),
+            "cannot counts as negation")
+        let hedged = [BriefingSitrepComposer.Highlight(text: "Residents may evacuate the coast.", publisher: nil)]
+        let certain = await BriefingSitrepComposer.compose(
+            title: "Corridor", highlights: hedged,
+            model: NewsTextModel { _, _ in "Residents evacuated the coast after the warning was issued." })
+        expectTrue(certain?.isGenerated == false, "A sentence that drops the facts' uncertainty falls back")
+        let faithful = NewsTextModel { _, _ in "Port authorities raised the security level, Reuters reports." }
+        let kept = await BriefingSitrepComposer.compose(title: "Corridor", highlights: highlights, model: faithful)
+        expectTrue(kept?.isGenerated == true, "A sentence restating the inputs is kept")
+        let busy = await BriefingSitrepComposer.compose(
+            title: "Corridor", highlights: highlights,
+            model: NewsTextModel { _, _ in throw NewsTextModel.TemporarilyUnavailable() })
+        expectTrue(busy?.isFinal == false, "A line made while the model is busy is not final")
+        expectTrue(
+            await BriefingSitrepComposer.compose(title: "Corridor", highlights: [], model: faithful) == nil,
+            "No highlights, no line")
+    }
+}

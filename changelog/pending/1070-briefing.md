@@ -1,0 +1,1 @@
+- Ports the five Briefing atoms (BriefingE2ETests, BriefingWarRoomTests, BriefingIntelligenceTests, BriefingImpactTests, BriefingSignalsTests: 157 tests, 539 assertions) to the native Swift Testing target under the `.briefing` tag.

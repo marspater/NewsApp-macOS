@@ -86,7 +86,7 @@ Tests and scripts carry no owner comment. This table says where each domain's ch
 | Mnemosyne | `StorageTests`, `Native/StorageSuite`, `Native/MigrationSuite`, `Native/EntityDossierSuite` | |
 | Clio | `EventOverviewAccessibilityTests`, `Native/PublisherExcerptSuite`, `Native/DualReaderSuite`, `Native/PerspectiveReportsSuite` | `script/evaluation/overview_review.py`; `./test.sh --timeline-audit` (`Tests/TimelineAudit.swift`, #1241: timeline arms, dropped-row reasons and Briefing threads on a library copy) |
 | Aletheia | `OverviewQualityAudit` (with Clio) | `Tests/Fixtures/generated-text/fidelity-corpus-v1.json` |
-| Athena | `TodayLaneAssignmentTests`, `TodayShadowEvaluation`, `TodayShadowComparisons`, `BriefingE2ETests`, `BriefingIntelligenceTests`, `EditorialRankingTests`, `EditorialPersonalizationTests`, `ImportanceAudit` | `script/test_editorial_ranking.sh`, `script/test_editorial_personalization.sh`, `script/evaluation/importance_review.py` |
+| Athena | `TodayLaneAssignmentTests`, `TodayShadowEvaluation`, `TodayShadowComparisons`, `BriefingE2ETests`, `Native/BriefingE2ESuite`, `BriefingIntelligenceTests`, `Native/BriefingIntelligenceSuite`, `EditorialRankingTests`, `EditorialPersonalizationTests`, `ImportanceAudit` | `script/test_editorial_ranking.sh`, `script/test_editorial_personalization.sh`, `script/evaluation/importance_review.py` |
 | Eris | `TensionCalibrationTests`, `Native/HotspotGazetteerSuite`, `Native/HotspotMapSuite` | `script/test_tension_calibration.sh`, `script/evaluation/calibrate_tension.py` |
 | Kairos | `EditorialNoveltyTests`, `EditorialMomentumTests` | `script/test_editorial_novelty.sh`, `script/test_editorial_momentum.sh`, `script/evaluation/momentum_inputs.py` |
 
