@@ -15,7 +15,7 @@ The newest 304 CI and Security workflow runs, 12 November 22:27 to 14 November 1
 | Test (macOS 26) | push to main | 259 | 32 | 23 |
 | Build Verification, Xcode 27 | push to main | 115 | 32 | 22 |
 | Today Captures, macOS 26 | push to main | 90 | 32 | 22 |
-| Ubuntu jobs (paths, CodeQL Actions, secret scan, dependency review) | both | 131 | 454 | 43 |
+| Ubuntu jobs (paths, CodeQL Actions, secret scan, dependency review) | both | 131 | 419 | 40 |
 
 - A cancelled run has spent its minutes and verified nothing. On `main`, 23 of 32 test runs and 22 of 30 Swift analyses were cancelled by the next merge, so most `main` commits were never verified or scanned.
 - Over the last 60 merges into `main` (12 and 13 November), 22 changed nothing that `swift build --target News` compiles, yet each started a 19 to 41 minute CodeQL Swift build.
@@ -28,7 +28,7 @@ The newest 304 CI and Security workflow runs, 12 November 22:27 to 14 November 1
 |---|---|---|
 | 1 | `ci.yml` started only for pull requests into `main`, so a stacked pull request's required checks waited forever (#1320). | Every base branch (separate pull request, below this one). |
 | 2 | `security.yml` had the same base filter, so stacked pull requests were never scanned before they reached `main`. | Every base branch. |
-| 3 | `main` runs cancelled each other (see Evidence). | Pull requests still cancel their older run. `main` queues: GitHub keeps one run going and one waiting, and a newer push replaces the waiting run before it starts. |
+| 3 | `main` runs cancelled each other (see Evidence). | Pull requests still cancel their older run. `main` queues: GitHub keeps one run going and one waiting, and a newer push replaces the waiting run before it starts. A push is measured from the last `main` commit the workflow finished on (`script/ci_push_base.sh`), so the commits of a replaced run fall into the newer run's range; measured from its own push alone, a documentation push could replace a waiting code run and then skip. |
 | 4 | Four different "nothing to test" lists: `ci.yml` (Markdown, docs, LICENSE), its push filter, CircleCI (eleven patterns) and Codemagic (docs and Markdown). None kept PRIVACY.md, which a test checks exists. | One rule, `script/ci_changes.sh`, with its own self-check, used by GitHub Actions and CircleCI; `codemagic.yaml` mirrors it. Python tooling is on the list because CircleCI `checks` runs its checks on every push. |
 | 5 | CircleCI `checks` ran 8 of the 11 Python self-checks that `./test.sh` runs (no `lead_review`, `calibrate_tension` or `pretrain_pairs`), and the editorial unit tests ran only on the GitHub macOS runner. | `script/python_checks.sh` holds the list plus all `script/evaluation/test_*.py` unit tests; `./test.sh` and CircleCI `checks` both call it. |
 | 6 | The editorial matrix (Python alone) ran on the macOS test runner. | A Linux job: when the evaluation tooling changes, and on each push to `main` that needs a run. |

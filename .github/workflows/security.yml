@@ -26,12 +26,16 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # What changed, against the pull request's merge base with its base branch or the commit main was at before the
-  # push. The weekly and manual runs analyse everything.
+  # What changed, against the pull request's merge base with its base branch, or for a push the last main commit
+  # this workflow finished on (a replaced waiting run is covered by the newer one). The weekly and manual runs
+  # analyse everything.
   changes:
     name: Security Paths
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read  # script/ci_push_base.sh reads this workflow's finished runs on main
     outputs:
       swift: ${{ steps.filter.outputs.swift }}
       workflows: ${{ steps.filter.outputs.workflows }}
@@ -47,10 +51,11 @@ jobs:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           case "$GITHUB_EVENT_NAME" in
             pull_request) changed=$(git diff --name-only "$(git merge-base "$PR_BASE" "$PR_HEAD")" "$PR_HEAD") || changed=ALL ;;
-            push) changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA") || changed=ALL ;;
+            push) changed=$(git diff --name-only "$(script/ci_push_base.sh security.yml "$BEFORE")" "$GITHUB_SHA") || changed=ALL ;;
             *) changed=ALL ;;
           esac
           # What `swift build --target News` compiles, and this workflow.

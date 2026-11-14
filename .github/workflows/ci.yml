@@ -36,6 +36,9 @@ jobs:
     name: Changed paths
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read  # script/ci_push_base.sh reads this workflow's finished runs on main
     outputs:
       code: ${{ steps.filter.outputs.code }}
       evaluation: ${{ steps.filter.outputs.evaluation }}
@@ -45,20 +48,25 @@ jobs:
         with:
           fetch-depth: 0
       # A pull request against its merge base with its own base branch (the branch below it in a stack); a push
-      # against the commit main was at before it. A manual run has no range and runs everything.
+      # against the last main commit this workflow finished on, so a waiting run that a newer push replaced is
+      # covered by the newer one. A manual run has no range and runs everything. A failing rule fails this required
+      # job instead of skipping the macOS jobs.
       - name: Detect changes that cannot affect the app
         id: filter
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           case "$GITHUB_EVENT_NAME" in
             pull_request) base=$(git merge-base "$PR_BASE" "$PR_HEAD" || echo unknown); head=$PR_HEAD ;;
-            push) base=$BEFORE; head=$GITHUB_SHA ;;
+            push) base=$(script/ci_push_base.sh ci.yml "$BEFORE"); head=$GITHUB_SHA ;;
             *) base=unknown; head=$GITHUB_SHA ;;
           esac
-          echo "code=$(script/ci_changes.sh "$base" "$head" '^\.github/workflows/ci\.yml$')" >> "$GITHUB_OUTPUT"
+          echo "Measured from $base"
+          code=$(script/ci_changes.sh "$base" "$head" '^\.github/workflows/ci\.yml$')
+          echo "code=$code" >> "$GITHUB_OUTPUT"
           evaluation=true
           if changed=$(git diff --name-only "$base" "$head" 2>/dev/null) && ! grep -q '^script/evaluation/' <<< "$changed"; then
             evaluation=false
