@@ -20,6 +20,8 @@ import Foundation
 @MainActor
 final class ReadManager: ObservableObject {
 
+    /// The read story IDs, updated at once on a local change and resynchronized from `ArticleStore` once no change is
+    /// pending.
     @Published var readArticles: Set<String> = []
     private let articleStore: ArticleStore
     private var cancellables = Set<AnyCancellable>()
@@ -27,6 +29,7 @@ final class ReadManager: ObservableObject {
     private var pendingMutations = 0
     private let reconciliationCache = NSCache<NSString, NSString>()
 
+    /// Creates a manager over the store (`ArticleStore.shared` when nil) and follows its read state.
     init(articleStore: ArticleStore? = nil) {
         let store = articleStore ?? ArticleStore.shared
         self.articleStore = store
@@ -52,6 +55,8 @@ final class ReadManager: ObservableObject {
         return canonicalId
     }
 
+    /// Marks one story read in memory at once and queues the write; a story already read is left alone. The ID is
+    /// reconciled from its legacy form first.
     func markAsRead(_ id: String) {
         let canonicalId = getCanonicalId(id)
         guard !readArticles.contains(canonicalId) else { return }
@@ -77,11 +82,13 @@ final class ReadManager: ObservableObject {
         }
     }
 
+    /// Whether the in-memory read set holds the story, after reconciling a legacy ID.
     func isRead(_ id: String) -> Bool {
         let canonicalId = getCanonicalId(id)
         return readArticles.contains(canonicalId)
     }
 
+    /// Flips one story's read state in memory at once and queues the write.
     func toggleRead(_ id: String) {
         let canonicalId = getCanonicalId(id)
         if readArticles.contains(canonicalId) {
@@ -106,6 +113,7 @@ final class ReadManager: ObservableObject {
         }
     }
 
+    /// Resolves once every queued read change has been written.
     func waitForPendingChanges() async { await mutationTask?.value }
 
     /// Every queued change is in the library. What a quit waits for.

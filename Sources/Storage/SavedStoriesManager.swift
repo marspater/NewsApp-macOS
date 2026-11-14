@@ -20,14 +20,19 @@ import Foundation
 @MainActor
 final class SavedStoriesManager: ObservableObject {
 
+    /// The saved stories, updated at once on a local change and resynchronized from `ArticleStore` once no change is
+    /// pending.
     @Published var savedArticles: [FeedArticle] = []
+    /// The IDs of `savedArticles`.
     @Published var savedArticleIDs: Set<String> = []
+    /// The normalized links of `savedArticles` that are document URLs; a story whose link matches one counts as saved.
     @Published var savedArticleLinks: Set<String> = []
     private var mutationTask: Task<Void, Never>?
     private var pendingMutations = 0
     private let articleStore: ArticleStore
     private var cancellables = Set<AnyCancellable>()
 
+    /// Creates a manager over the store (`ArticleStore.shared` when nil) and follows its saved stories.
     init(articleStore: ArticleStore? = nil) {
         let store = articleStore ?? ArticleStore.shared
         self.articleStore = store
@@ -47,6 +52,8 @@ final class SavedStoriesManager: ObservableObject {
             .store(in: &cancellables)
     }
 
+    /// Saves a story in memory at once and queues the write and its Spotlight update; a story already saved is left
+    /// alone.
     func save(_ article: FeedArticle) {
         guard !isSaved(article) else { return }
         savedArticles.insert(article, at: 0)
@@ -55,6 +62,7 @@ final class SavedStoriesManager: ObservableObject {
         persistSaved([article], isSaved: true)
     }
 
+    /// Unsaves a story and every saved story with the same document link, in memory at once, and queues the writes.
     func remove(_ article: FeedArticle) {
         guard isSaved(article) else { return }
         // Only document URLs can alias bookmarks; homepage/malformed links stay keyed by article ID.
@@ -70,6 +78,8 @@ final class SavedStoriesManager: ObservableObject {
         persistSaved(matching, isSaved: false)
     }
 
+    /// Empties Saved Stories in memory at once and queues the library-wide removal, which also clears the Spotlight
+    /// domain. A failed removal restores the stored list once no change is pending.
     func removeAll() {
         savedArticles.removeAll()
         savedArticleIDs.removeAll()
@@ -89,6 +99,7 @@ final class SavedStoriesManager: ObservableObject {
         }
     }
 
+    /// Whether the story is saved by ID, or by its document link when it has one.
     func isSaved(_ article: FeedArticle) -> Bool {
         savedArticleIDs.contains(article.id)
             || (DatabaseEngine.isDocumentURL(article.normalizedLink)

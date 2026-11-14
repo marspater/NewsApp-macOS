@@ -20,7 +20,9 @@ import SQLite3
 /// One event of a saved Briefing edition, as "Since your last briefing" compares it.
 struct BriefingEditionSnapshotRow: Equatable, Sendable {
     let eventID: String
+    /// The event's membership version when the edition was saved; a higher one now means new reports.
     let membershipVersion: Int
+    /// Distinct publishers on the event when the edition was saved.
     let publisherCount: Int
     /// `TensionEscalation` raw value when a cited passage supports it, else nil.
     let escalation: String?
@@ -43,6 +45,8 @@ extension DatabaseEngine {
         let isGenerated: Bool
     }
 
+    /// The cached sitrep line for an event, or nil when none is stored. The caller compares its `inputHash` with
+    /// `briefingSitrepInputHash(eventID:title:overview:)` before using it.
     func fetchBriefingSitrep(eventID: String) throws -> BriefingSitrepRow? {
         guard
             let row = try eventRows(
