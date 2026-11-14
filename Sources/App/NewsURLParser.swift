@@ -16,8 +16,11 @@ import Foundation
 
 /// Pure, testable parser for NewsApp custom URL schemes (`feed:` and `news:`).
 public struct NewsURLParser: Sendable {
+    /// What an incoming URL asks for.
     public enum Destination: Equatable, Sendable {
+        /// Subscribe to the feed at this URL, from a `feed:` link.
         case addFeed(url: URL)
+        /// Open the story with this id, from a `news://story/<id>` link.
         case story(id: String)
     }
 

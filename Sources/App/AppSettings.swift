@@ -19,6 +19,7 @@ import SwiftUI
 /// Decouples persistence and configuration state from feed ingestion and network services.
 @MainActor
 final class AppSettings: ObservableObject {
+    /// The settings the app uses, stored in the standard defaults.
     static let shared = AppSettings()
 
     // MARK: - Persistence Keys
@@ -72,13 +73,18 @@ final class AppSettings: ObservableObject {
         for key in backedUpKeys { defaults.set(values[key], forKey: key) }
     }
 
+    /// How much a story notification shows; the raw value is stored.
     enum NotificationMode: String, CaseIterable, Identifiable, Sendable {
+        /// The headline, the publisher and the lead image.
         case full = "full"  // Headlines + snippets + images
+        /// A generic alert without headline, publisher or preview.
         case privacy = "private"  // Generic non-identifying updates
+        /// One count of new stories.
         case minimal = "minimal"  // Aggregated count only
 
         var id: String { rawValue }
 
+        /// A sentence describing the mode for Settings.
         var detail: String {
             switch self {
             case .privacy:
@@ -89,6 +95,7 @@ final class AppSettings: ObservableObject {
             }
         }
 
+        /// The mode's name in the Settings picker.
         var displayName: String {
             switch self {
             case .full: return "Full (Headlines & Images)"
@@ -98,11 +105,13 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// The sidebar sections of a fresh install.
     static let defaultSections = [
         "Entertainment", "Politics", "Business", "Tech",
         "Food", "Health & Wellness", "Lifestyle", "Science",
     ]
 
+    /// The subscriptions of a fresh install.
     static let defaultFeeds = [
         "https://feeds.arstechnica.com/arstechnica/index",
         "https://feeds.bbci.co.uk/news/rss.xml",
@@ -126,6 +135,7 @@ final class AppSettings: ObservableObject {
         ("https://www.smithsonianmag.com/rss/smart-news", 4),
         ("https://rollcall.com/feed", 4),
     ]
+    /// The highest retirement version in `retiredFeeds`, stored once applied.
     static var retiredFeedsVersion: Int { retiredFeeds.map(\.version).max() ?? 0 }
 
     /// Catalog feeds that moved to a new address (#1213). Subscriptions and stars automatically migrate on load.
@@ -137,6 +147,8 @@ final class AppSettings: ObservableObject {
 
     private let defaults: UserDefaults
 
+    /// The sidebar sections, including imported OPML folders.
+    /// The subscribed feed URLs, normalized, in subscription order.
     @Published var feedURLs: [String]
     @Published var userSections: [String]
     /// Explicit OPML section membership, distinct from keyword/category sections; persisted with subscriptions.
@@ -168,6 +180,7 @@ final class AppSettings: ObservableObject {
     /// default. Read it as `briefingLayout` (BriefingModules.swift).
     @Published private(set) var briefingModuleOrder: [String: [String]]?
 
+    /// Loads the settings from `defaults`, migrating moved feeds and dropping retired and parked subscriptions.
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.briefingModuleOrder = defaults.dictionary(forKey: Self.briefingModuleOrderKey) as? [String: [String]]
@@ -443,6 +456,7 @@ final class AppSettings: ObservableObject {
         return epoch > 0 ? Date(timeIntervalSince1970: epoch) : nil
     }
 
+    /// Whether a subscription has the same feed key as the URL.
     func hasFeed(_ normalizedURL: String) -> Bool {
         let key = Self.feedKey(normalizedURL)
         return feedURLs.contains { Self.feedKey($0) == key }
@@ -450,6 +464,8 @@ final class AppSettings: ObservableObject {
 
     // MARK: - Mutation APIs
 
+    /// Subscribes to a feed after normalizing its URL (upgrading `http` unless allowed); returns the stored URL, or nil
+    /// when it is invalid or already subscribed.
     func addFeed(url: String) -> String? {
         guard let normalized = Self.normalizeFeedURL(url, allowInsecureHTTP: allowInsecureHTTP) else {
             return nil
@@ -461,6 +477,7 @@ final class AppSettings: ObservableObject {
         return normalized
     }
 
+    /// Ends the subscription with the URL's feed key, removes it from its OPML folders and unstars it.
     func removeFeed(url: String) {
         let key = Self.feedKey(url)
         let removed = feedURLs.filter { Self.feedKey($0) == key }
@@ -493,6 +510,7 @@ final class AppSettings: ObservableObject {
 
     // MARK: - Catalog
 
+    /// Whether the catalog feed is subscribed.
     func isSubscribed(_ feed: CatalogFeed) -> Bool {
         hasFeed(feed.url)
     }
@@ -535,6 +553,7 @@ final class AppSettings: ObservableObject {
         return advisory
     }
 
+    /// Adds a sidebar section; an empty or existing name is ignored.
     func addSection(_ name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !userSections.contains(trimmed) else { return }
@@ -542,32 +561,38 @@ final class AppSettings: ObservableObject {
         saveSections()
     }
 
+    /// Removes a sidebar section and its OPML folder membership.
     func removeSection(_ name: String) {
         userSections.removeAll { $0 == name }
         opmlFolderFeeds.removeValue(forKey: name)
         saveSections()
     }
 
+    /// Stores the automatic refresh interval in minutes.
     func setFetchInterval(minutes: Double) {
         fetchIntervalMinutes = minutes
         defaults.set(minutes, forKey: Self.fetchIntervalKey)
     }
 
+    /// Stores how many days stories are kept; a negative value is stored as 0.
     func setArticleRetentionDays(_ days: Int) {
         articleRetentionDays = max(0, days)
         defaults.set(articleRetentionDays, forKey: Self.articleRetentionDaysKey)
     }
 
+    /// Turns story notifications on or off.
     func setNotificationsEnabled(_ enabled: Bool) {
         notificationsEnabled = enabled
         defaults.set(enabled, forKey: Self.notificationsEnabledKey)
     }
 
+    /// Shows or hides the unread count on the Dock icon.
     func setShowsDockBadge(_ shows: Bool) {
         showsDockBadge = shows
         defaults.set(shows, forKey: Self.showsDockBadgeKey)
     }
 
+    /// Shows or hides the menu bar item; an unchanged value is not published.
     func setShowsMenuBarExtra(_ shows: Bool) {
         // The menu bar item's isInserted binding writes back during view updates; publishing an unchanged value there
         // re-runs the scene body, which writes again, until the stack overflows at launch.
@@ -576,27 +601,32 @@ final class AppSettings: ObservableObject {
         defaults.set(shows, forKey: Self.showsMenuBarExtraKey)
     }
 
+    /// Records that the first-launch sheet was completed.
     func completeFirstLaunch() {
         firstLaunchCompleted = true
         defaults.set(true, forKey: Self.firstLaunchCompletedKey)
     }
 
+    /// Turns AI story analysis on or off.
     func setAIEnabled(_ enabled: Bool) {
         aiEnabled = enabled
         defaults.set(enabled, forKey: Self.aiEnabledKey)
     }
 
+    /// Stores the notification mode, and the legacy private-notifications flag with it.
     func setNotificationMode(_ mode: NotificationMode) {
         notificationMode = mode
         defaults.set(mode.rawValue, forKey: Self.notificationModeKey)
         defaults.set(mode == .privacy, forKey: Self.privateNotificationsEnabledKey)
     }
 
+    /// Allows or refuses plain `http` feeds.
     func setAllowInsecureHTTP(_ allowed: Bool) {
         allowInsecureHTTP = allowed
         defaults.set(allowed, forKey: Self.allowInsecureHTTPKey)
     }
 
+    /// Turns World Tension panel collection on or off.
     func setTensionCollectionOptIn(_ enabled: Bool) {
         tensionCollectionOptIn = enabled
         defaults.set(enabled, forKey: Self.tensionCollectionOptInKey)
@@ -608,6 +638,7 @@ final class AppSettings: ObservableObject {
         set { setTensionCollectionOptIn(newValue) }
     }
 
+    /// Same as `setTensionCollectionOptIn(_:)`.
     func setIsWorldTensionEnabled(_ enabled: Bool) {
         setTensionCollectionOptIn(enabled)
     }
@@ -632,12 +663,14 @@ final class AppSettings: ObservableObject {
         return topic
     }
 
+    /// Removes a muted publisher host.
     func unmuteSource(_ host: String) {
         var rules = muteRules
         rules.removeSource(host)
         setMuteRules(rules)
     }
 
+    /// Removes a muted topic.
     func unmuteTopic(_ topic: String) {
         var rules = muteRules
         rules.removeTopic(topic)
@@ -686,6 +719,8 @@ final class AppSettings: ObservableObject {
 
     // MARK: - OPML Portability
 
+    /// Subscribes to the OPML file's feeds that are new and files them under their folders as sidebar sections, a
+    /// reserved name getting a " (Feeds)" suffix; returns how many feeds were added. Invalid URLs are skipped.
     @discardableResult
     func importFeeds(from opmlData: Data) -> Int {
         let items = OPMLParser.parse(data: opmlData)
@@ -743,6 +778,7 @@ final class AppSettings: ObservableObject {
         reservedSectionNames.contains(name.lowercased()) ? "\(name) (Feeds)" : name
     }
 
+    /// The subscriptions and their folders as an OPML document.
     func exportOPML() -> String {
         OPMLExporter.generateOPML(feedURLs: feedURLs, folders: opmlFolderFeeds)
     }
@@ -756,11 +792,13 @@ final class AppSettings: ObservableObject {
         defaults.set(opmlFolderFeeds, forKey: Self.opmlFolderFeedsKey)
     }
 
+    /// Adds a smart binder and saves the list.
     func addSmartBinder(_ binder: SmartBinder) {
         smartBinders.append(binder)
         saveSmartBinders()
     }
 
+    /// Replaces the smart binder with the same id; an unknown id changes nothing.
     func updateSmartBinder(_ binder: SmartBinder) {
         if let index = smartBinders.firstIndex(where: { $0.id == binder.id }) {
             smartBinders[index] = binder
@@ -768,19 +806,23 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// Removes the smart binder with this id.
     func removeSmartBinder(id: UUID) {
         smartBinders.removeAll { $0.id == id }
         saveSmartBinders()
     }
 
+    /// Removes this smart binder.
     func removeSmartBinder(_ binder: SmartBinder) {
         removeSmartBinder(id: binder.id)
     }
 
+    /// The smart binder with this id, if any.
     func smartBinder(id: UUID) -> SmartBinder? {
         smartBinders.first { $0.id == id }
     }
 
+    /// The smart binder a sidebar tag names, if any.
     func smartBinder(forTag tag: String) -> SmartBinder? {
         guard let id = SmartBinder.binderID(fromTag: tag) else { return nil }
         return smartBinder(id: id)
@@ -805,11 +847,16 @@ final class AppSettings: ObservableObject {
 /// Allows simulating VoiceOver, Increase Contrast, Reduce Motion, and Text Scaling
 /// without altering global macOS system preferences.
 public struct SystemSettingsOverrides: Sendable {
+    /// The contrast to simulate; nil keeps the system's.
     public var contrast: ColorSchemeContrast?
+    /// Reduce Motion to simulate; nil keeps the system's.
     public var reduceMotion: Bool?
+    /// VoiceOver to simulate; nil keeps the system's.
     public var voiceOverEnabled: Bool?
+    /// A text scale mapped to a Dynamic Type size; nil keeps the system's.
     public var textScale: CGFloat?
 
+    /// Creates overrides; nil values leave the system setting in place.
     public init(
         contrast: ColorSchemeContrast? = nil,
         reduceMotion: Bool? = nil,
@@ -822,6 +869,8 @@ public struct SystemSettingsOverrides: Sendable {
         self.textScale = textScale
     }
 
+    /// Reads overrides from user defaults (including `-key value` launch arguments), then from command-line flags such
+    /// as `--increase-contrast`, `--reduce-motion`, `--voice-over` and `--text-scale <n>`, which win.
     public static func from(
         arguments: [String] = ProcessInfo.processInfo.arguments,
         defaults: UserDefaults = .standard
@@ -902,16 +951,19 @@ private struct OverrideVoiceOverKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
+    /// The simulated contrast, or nil.
     public var overrideContrast: ColorSchemeContrast? {
         get { self[OverrideContrastKey.self] }
         set { self[OverrideContrastKey.self] = newValue }
     }
 
+    /// The simulated Reduce Motion, or nil.
     public var overrideReduceMotion: Bool? {
         get { self[OverrideReduceMotionKey.self] }
         set { self[OverrideReduceMotionKey.self] = newValue }
     }
 
+    /// The simulated VoiceOver state, or nil.
     public var overrideVoiceOver: Bool? {
         get { self[OverrideVoiceOverKey.self] }
         set { self[OverrideVoiceOverKey.self] = newValue }
@@ -935,8 +987,10 @@ extension EnvironmentValues {
 
 /// Applies simulated accessibility and display system settings to the SwiftUI environment.
 public struct SystemSettingsOverrideModifier: ViewModifier {
+    /// The settings to simulate.
     public let overrides: SystemSettingsOverrides
 
+    /// Creates a modifier; the default reads the overrides of this launch.
     public init(overrides: SystemSettingsOverrides = .from()) {
         self.overrides = overrides
     }

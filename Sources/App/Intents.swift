@@ -20,6 +20,7 @@ import Foundation
 
 // MARK: - AppSection AppEnum
 
+/// A sidebar section that Shortcuts can open.
 public enum AppSection: String, AppEnum, Sendable {
     case today = "Today"
     case unread = "Unread"
@@ -38,25 +39,34 @@ public enum AppSection: String, AppEnum, Sendable {
 
 // MARK: - Dependency Resolver & Testable Container
 
+/// Where the intents find the app's stores; tests set the overrides and the navigation handler.
 @MainActor
 enum IntentDependencyResolver {
+    /// Replaces `AppContainer.shared.feedManager`.
     static var feedManagerOverride: FeedManager?
+    /// Replaces `ArticleStore.shared`.
     static var articleStoreOverride: ArticleStore?
+    /// Replaces `AppSettings.shared`.
     static var appSettingsOverride: AppSettings?
+    /// Replaces posting a jump command in `routeToSection(_:)`.
     static var sectionNavigationHandler: (@MainActor @Sendable (AppSection) -> Void)?
 
+    /// The override, else the app's feed manager.
     static func resolveFeedManager() -> FeedManager {
         feedManagerOverride ?? AppContainer.shared.feedManager
     }
 
+    /// The override, else the shared article store.
     static func resolveArticleStore() -> ArticleStore {
         articleStoreOverride ?? ArticleStore.shared
     }
 
+    /// The override, else the shared settings.
     static func resolveAppSettings() -> AppSettings {
         appSettingsOverride ?? AppSettings.shared
     }
 
+    /// Calls the navigation handler, else posts the section's jump command for the main window.
     static func routeToSection(_ section: AppSection) {
         if let sectionNavigationHandler {
             sectionNavigationHandler(section)
@@ -77,6 +87,7 @@ enum IntentDependencyResolver {
 
 // MARK: - 1. RefreshFeedsIntent
 
+/// Refreshes every subscribed feed in the background, or reports why a refresh is blocked.
 public struct RefreshFeedsIntent: AppIntent {
     public static let title: LocalizedStringResource = "Refresh Feeds"
     public static let description = IntentDescription("Fetches latest stories from all subscribed feeds.")
@@ -90,6 +101,7 @@ public struct RefreshFeedsIntent: AppIntent {
         self.feedManager = nil
     }
 
+    /// Creates an intent that refreshes through `feedManager`, or the resolved one when nil.
     init(feedManager: FeedManager?) {
         self.feedManager = feedManager
     }
@@ -107,6 +119,8 @@ public struct RefreshFeedsIntent: AppIntent {
 
 // MARK: - 2. AddFeedIntent
 
+/// Subscribes to an `http` or `https` feed URL through the feed manager, which fetches it at once; returns whether it
+/// was added.
 public struct AddFeedIntent: AppIntent {
     public static let title: LocalizedStringResource = "Add Feed"
     public static let description = IntentDescription("Subscribes to an RSS or Atom feed URL.")
@@ -114,6 +128,7 @@ public struct AddFeedIntent: AppIntent {
     /// macOS 26 and later read this instead of `openAppWhenRun`, which stays for macOS 15.
     @available(macOS 26.0, *) public static var supportedModes: IntentModes { .background }
 
+    /// The feed to subscribe to.
     @Parameter(title: "Feed URL")
     public var url: URL
 
@@ -124,6 +139,7 @@ public struct AddFeedIntent: AppIntent {
         self.url = URL(string: "https://example.com")!
     }
 
+    /// Creates an intent for `url` that subscribes through `feedManager`, or the resolved one when nil.
     init(url: URL, feedManager: FeedManager? = nil) {
         self.feedManager = feedManager
         self.url = url
@@ -147,6 +163,7 @@ public struct AddFeedIntent: AppIntent {
 
 // MARK: - 3. OpenSectionIntent
 
+/// Brings News forward on a sidebar section.
 public struct OpenSectionIntent: AppIntent {
     public static let title: LocalizedStringResource = "Open Section"
     public static let description = IntentDescription("Opens a specified section in News.")
@@ -154,6 +171,7 @@ public struct OpenSectionIntent: AppIntent {
     /// macOS 26 and later read this instead of `openAppWhenRun`, which stays for macOS 15.
     @available(macOS 26.0, *) public static var supportedModes: IntentModes { .foreground }
 
+    /// The section to open.
     @Parameter(title: "Section")
     public var section: AppSection
 
@@ -164,6 +182,7 @@ public struct OpenSectionIntent: AppIntent {
         self.section = .today
     }
 
+    /// Creates an intent for `section`; `navigationHandler` replaces the resolver's routing.
     init(section: AppSection, navigationHandler: (@MainActor @Sendable (AppSection) -> Void)? = nil) {
         self.navigationHandler = navigationHandler
         self.section = section
@@ -182,6 +201,7 @@ public struct OpenSectionIntent: AppIntent {
 
 // MARK: - 4. MarkAllAsReadIntent
 
+/// Marks every story the mute rules leave visible as read.
 public struct MarkAllAsReadIntent: AppIntent {
     public static let title: LocalizedStringResource = "Mark All as Read"
     public static let description = IntentDescription("Marks all stories in the library as read.")
@@ -195,6 +215,7 @@ public struct MarkAllAsReadIntent: AppIntent {
         self.articleStore = nil
     }
 
+    /// Creates an intent that marks through `articleStore`, or the resolved one when nil.
     init(articleStore: ArticleStore?) {
         self.articleStore = articleStore
     }
@@ -210,6 +231,7 @@ public struct MarkAllAsReadIntent: AppIntent {
 
 // MARK: - 5. NewBriefingIntent
 
+/// Starts a new Briefing edition by clearing the stored edition and jumping to Briefing.
 public struct NewBriefingIntent: AppIntent {
     public static let title: LocalizedStringResource = "New Briefing"
     public static let description = IntentDescription("Generates a fresh daily briefing edition.")
@@ -225,6 +247,7 @@ public struct NewBriefingIntent: AppIntent {
         self.resetAction = nil
     }
 
+    /// Creates an intent; `resetAction` replaces clearing the stored edition, for tests.
     init(appSettings: AppSettings? = nil, resetAction: (@MainActor @Sendable () -> Void)? = nil) {
         self.appSettings = appSettings
         self.resetAction = resetAction
@@ -247,6 +270,7 @@ public struct NewBriefingIntent: AppIntent {
 
 // MARK: - NewsShortcuts
 
+/// The App Shortcuts News offers in Shortcuts and Spotlight.
 public struct NewsShortcuts: AppShortcutsProvider {
     public static let shortcutTileColor: ShortcutTileColor = .navy
 
