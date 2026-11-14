@@ -256,4 +256,35 @@ final class NewsSmokeUITests: XCTestCase {
         XCTAssertTrue(story(headline).waitForExistence(timeout: 20), "The save made just before quitting was lost")
     }
 
+    /// #715, the keyboard pass of the Publisher Health sheet: the table lists the subscribed feed, a row can be
+    /// selected, Escape closes the sheet and so does Return, the Done button's default action.
+    func test11PublisherHealthSheetByKeyboard() {
+        openSettings()
+        let settings = settingsWindow
+        settings.toolbars.buttons["Subscriptions"].click()
+        let opener = settings.buttons["Publisher Health…"]
+        XCTAssertTrue(opener.waitForExistence(timeout: 10), "Missing Publisher Health opener")
+        let sheet = settings.sheets.firstMatch
+        let dismissed = NSPredicate(format: "exists == false")
+
+        opener.click()
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10), "Publisher Health did not open")
+        let row = sheet.outlines.firstMatch.outlineRows.firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "The table lists no feed")
+        sheet.typeKey(.escape, modifierFlags: [])
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: dismissed, object: sheet)], timeout: 5),
+            .completed, "Escape did not close Publisher Health")
+
+        opener.click()
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10), "Publisher Health did not reopen")
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "The table lists no feed after reopening")
+        row.click()
+        XCTAssertTrue(row.isSelected, "A click did not select the feed's row")
+        sheet.typeKey(.return, modifierFlags: [])
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: dismissed, object: sheet)], timeout: 5),
+            .completed, "Return did not close Publisher Health")
+    }
+
 }
