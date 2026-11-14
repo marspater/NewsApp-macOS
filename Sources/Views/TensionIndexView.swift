@@ -26,6 +26,7 @@ extension Notification.Name {
 enum NewsTensionRequest {
     private(set) static var isPending = false
 
+    /// Marks the request pending and asks an open main window to show the sheet.
     static func post() {
         isPending = true
         NotificationCenter.default.post(name: .showNewsTensionCommand, object: nil)
@@ -41,6 +42,7 @@ enum NewsTensionRequest {
 /// World Tension v2: an on-device assessment of international headlines, with its own history. The sheet shows the
 /// window's `WorldTensionModel` (#781) and asks its owner for a fresh assessment; it assesses nothing itself.
 struct TensionIndexView: View {
+    /// The sheet's title.
     static let navigationTitleText = "World Tension"
     @Environment(WorldTensionModel.self) private var model
     private var state: WorldTensionState { model.state }
@@ -430,7 +432,9 @@ struct TensionIndexView: View {
 /// The sheet's trend: one point per UTC day in its band colour, a line that breaks at missing days and model changes,
 /// and the axis labelled in UTC days, the days the readings belong to. Selecting a day selects its reading.
 struct TensionTrendChart: View {
+    /// The readings to plot, one per UTC day.
     let readings: [WorldTensionReading]
+    /// The selected UTC day; the sheet shows its reading.
     @Binding var selection: Date?
 
     private static let utcCalendar: Calendar = {
@@ -472,6 +476,7 @@ struct TensionTrendChart: View {
 
 /// The full 0–100 scale with the band colours and a marker at the current score.
 struct TensionScaleBar: View {
+    /// The score the marker points at, 0 to 100.
     let score: Int
     @Environment(\.effectiveContrast) private var contrast
 
@@ -514,6 +519,7 @@ struct TensionScaleBar: View {
 
 /// Display-driven drawing, without a fixed frame interval. Only the open, active sheet owns this timeline.
 struct TensionGlyph: View {
+    /// The level whose form and pace the glyph draws.
     let level: TensionLevel
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -754,6 +760,7 @@ struct TensionGlyph: View {
 struct TensionSidebarButton: View {
     /// The state the sheet and the Briefing strip show too (#781).
     @Environment(WorldTensionModel.self) private var model
+    /// Opens the World Tension sheet.
     let open: () -> Void
 
     private var state: WorldTensionState { model.state }

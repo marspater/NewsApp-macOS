@@ -55,6 +55,7 @@ struct SmartBinderSheet: View {
         "Sports", "Health & Wellness", "Food", "Travel", "Fashion",
     ]
 
+    /// Creates the sheet; with `binder`, its fields start from that binder and saving updates it.
     init(binder: SmartBinder? = nil) {
         self.binder = binder
         if let binder {
@@ -288,23 +289,32 @@ struct SmartBinderSheet: View {
         publishersText = binder.publishers.joined(separator: ", ")
     }
 
+    /// The sheet's fields as typed, from which `buildBinder(from:)` makes the binder.
     struct Draft {
+        /// The binder being edited; nil creates a new one.
         var existing: SmartBinder?
         var name: String = ""
         var icon: String = "folder"
         var categories: Set<String> = []
+        /// Keywords a story must contain, comma-separated.
         var includeKeywordsText: String = ""
+        /// Keywords that exclude a story, comma-separated.
         var excludeKeywordsText: String = ""
+        /// Publisher names, comma-separated.
         var publishersText: String = ""
+        /// Whether a story needs every include keyword rather than any one.
         var matchAllKeywords: Bool = false
     }
 
+    /// The comma-separated items, trimmed, without empty ones.
     static func parseCommaSeparated(_ text: String) -> [String] {
         text.components(separatedBy: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
     }
 
+    /// The binder the draft describes: the edited binder updated in place, or a new one, with the name trimmed, the
+    /// lists parsed and the categories sorted.
     static func buildBinder(from draft: Draft) -> SmartBinder {
         let includes = parseCommaSeparated(draft.includeKeywordsText)
         let excludes = parseCommaSeparated(draft.excludeKeywordsText)

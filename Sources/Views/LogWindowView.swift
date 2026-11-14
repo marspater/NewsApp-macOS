@@ -20,31 +20,42 @@ import SwiftUI
 /// that `make run` builds; values stay as the log redacts them.
 @MainActor
 final class LogWindowModel: ObservableObject {
+    /// One log line with an id unique within the window's session.
     struct Entry: Identifiable, Equatable {
+        /// The line's position in the order the window received lines.
         let id: Int
         let line: DiagnosticsExport.LogLine
     }
 
+    /// The window's scene id.
     nonisolated static let windowID = "log"
+    /// The bundle id of the development build, the only build with the Log window.
     nonisolated static let developmentBundleIdentifier = "com.marspater.news.dev"
     // ponytail: the newest 5,000 lines stay; a longer launch is what Export Diagnostics is for.
+    /// The most lines the window keeps; older ones are dropped.
     static let maximumEntries = 5_000
 
+    /// Whether a build with this bundle id has the Log window.
     nonisolated static func isAvailable(bundleIdentifier: String?) -> Bool {
         bundleIdentifier == developmentBundleIdentifier
     }
 
+    /// Whether this build has the Log window.
     nonisolated static var isAvailable: Bool { isAvailable(bundleIdentifier: Bundle.main.bundleIdentifier) }
 
     @Published private(set) var entries: [Entry] = []
+    /// The level the view shows; nil shows every level.
     @Published var level: String?
+    /// The category the view shows; nil shows every category.
     @Published var category: String?
+    /// Text the shown lines must contain in their message or category.
     @Published var search = ""
     /// Follows new lines until the person scrolls up, and again once they scroll back to the end or clear the view.
     @Published var follows = true
     private var readThrough = Date.distantPast
     private var nextID = 0
 
+    /// The kept lines that pass the level, category and text filters.
     var visible: [Entry] {
         let query = search.trimmingCharacters(in: .whitespaces)
         return entries.filter { entry in
@@ -54,10 +65,13 @@ final class LogWindowModel: ObservableObject {
         }
     }
 
+    /// The categories of the kept lines, with the selected one even when no kept line has it, sorted.
     var categories: [String] { Set(entries.map(\.line.category) + [category].compactMap { $0 }).sorted() }
 
+    /// The shown lines as text, one per line.
     var visibleText: String { visible.map { Self.text(of: $0.line) }.joined(separator: "\n") }
 
+    /// "12:04:05.123 Info Refresh: message": the line's time, level, category and message.
     static func text(of line: DiagnosticsExport.LogLine) -> String {
         let time = line.date.formatted(.dateTime.hour().minute().second().secondFraction(.fractional(3)))
         return "\(time) \(line.level) \(line.category): \(line.message)"
@@ -83,18 +97,22 @@ final class LogWindowModel: ObservableObject {
         follows = true
     }
 
+    /// Reads the log lines since the last one read, off the main actor, and appends them.
     func refresh() async {
         let start = readThrough
         let lines = try? await Task.detached(priority: .utility) { try DiagnosticsExport.logLines(since: start) }.value
         append(lines ?? [])
     }
 
+    /// Copies the shown lines to the clipboard.
     func copyVisible() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(visibleText, forType: .string)
     }
 }
 
+/// The development Log window: this launch's log lines, refreshed every two seconds, with level, category and text
+/// filters and a Copy button.
 struct LogWindowView: View {
     @StateObject private var model = LogWindowModel()
 

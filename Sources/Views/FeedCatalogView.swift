@@ -16,9 +16,13 @@ import SwiftUI
 
 /// Opt-in browser for the curated starter catalog. Nothing is subscribed until the user chooses it.
 struct FeedCatalogView: View {
+    /// The sheet's title.
     static let navigationTitleText = "Feed Catalog"
+    /// Whether Done sits in the toolbar's confirmation slot; the UI checks assert it.
     static let showsDoneInToolbar = true
+    /// Whether a Done bar sits at the bottom of the sheet; the UI checks assert it does not.
     static let hasBottomDoneBar = false
+    /// Whether the sheet draws its own background; the UI checks assert it does not.
     static let hasCustomSheetBackground = false
 
     @EnvironmentObject private var appSettings: AppSettings

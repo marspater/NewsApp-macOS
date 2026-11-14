@@ -19,11 +19,17 @@ import os
 /// A notification as the app draws it (DESIGN.md 8.7): the app's own panel is the only delivery path, so every
 /// banner is this value, from a story's own banner to the summary and the private one.
 struct StoryBanner: Sendable, Equatable {
+    /// Identifies the banner; the photo it loads is applied only while this banner is still on screen.
     var id: String
+    /// The banner's first line: the story's publisher, a grouped banner's title, or "News Update" for summary and
+    /// private banners.
     var title: String
+    /// The story's headline; empty for grouped, summary and private banners.
     var headline = ""
     var body = ""
+    /// The story a click opens; nil for grouped, summary and private banners.
     var articleID: String?
+    /// The story's link; the router finds the story by it only when `articleID` is nil.
     var articleLink: String?
     /// The story photos to try in order; empty for grouped, summary and private banners.
     var imageURLs: [URL] = []
@@ -54,16 +60,20 @@ struct StoryBanner: Sendable, Equatable {
 /// App icon, publisher, headline and summary on the glass, and the story photo filling the trailing side to the
 /// banner's own corners, dissolving toward the text.
 struct StoryBannerView: View {
+    /// The banner to draw.
     let banner: StoryBanner
+    /// The cropped story photo; nil draws no photo.
     let photo: CGImage?
     /// Set by the panel's own tracking area, which follows the pointer while News is not the active app as well.
     var hovering = false
     /// An Alert-style banner stays until closed, so its close button and actions show without a pointer.
     var persistent = false
     // The presenter supplies these; an offscreen render has nothing to open, close or act on.
+    /// Opens the banner's story.
     var open: () -> Void = {
         // Nothing to open offscreen.
     }
+    /// Closes the banner.
     var close: () -> Void = {
         // Nothing to close offscreen.
     }
@@ -170,6 +180,7 @@ struct StoryBannerView: View {
 /// minimized or without a window (DESIGN.md 8.7). The panel never hides with the app and outlives its windows.
 @MainActor
 final class StoryBannerPresenter {
+    /// The one presenter of the app.
     static let shared = StoryBannerPresenter()
     /// Every decision on the way to a banner, at notice level so `log show` keeps it (#926). No story text is logged.
     nonisolated static let log = Logger(subsystem: "com.marspater.news", category: "StoryBanner")
@@ -194,7 +205,9 @@ final class StoryBannerPresenter {
     private var shown: Shown?
     /// Read-only banner state for headless regression assertions.
     var hasPresentedPhoto: Bool { shown?.photo != nil }
+    /// Whether a banner is on screen.
     var isShowing: Bool { shown != nil }
+    /// The panel, for tests.
     var panelForTesting: NSPanel? { panel }
     /// Whether the banner on screen will leave by itself.
     var hasDismissalTimer: Bool { dismissal.map { !$0.isCancelled } ?? false }
@@ -205,6 +218,7 @@ final class StoryBannerPresenter {
     private var photoTask: Task<Void, Never>?
     private let photoLoader: @MainActor @Sendable (URL?, CGFloat) async -> CGImage?
 
+    /// Creates a presenter; tests pass a photo loader that needs no network.
     init(
         photoLoader: @escaping @MainActor @Sendable (URL?, CGFloat) async -> CGImage? = { url, scale in
             await StoryBannerPresenter.photo(at: url, scale: scale)
@@ -279,6 +293,7 @@ final class StoryBannerPresenter {
         return true
     }
 
+    /// Closes the banner on screen, cancels its timer and photo load, and fades the panel out.
     func dismiss() {
         dismissal?.cancel()
         photoTask?.cancel()
@@ -327,6 +342,7 @@ final class StoryBannerPresenter {
         return photo
     }
 
+    /// The photo cropped to the banner's aspect at the screen scale, dissolving toward the text.
     nonisolated static func bannerPhoto(_ image: CGImage, scale: CGFloat) -> CGImage? {
         NotificationService.dissolvingCrop(
             image, aspect: AppLayout.bannerPhotoWidth / AppLayout.bannerPhotoHeight,
@@ -470,6 +486,7 @@ final class StoryBannerPresenter {
 /// entering and leaving even while News is not the active app, where SwiftUI's hover tracking stays silent.
 @MainActor
 final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
+    /// Called with true when the pointer enters the view and false when it leaves.
     var hover: ((Bool) -> Void)?
 
     override func acceptsFirstMouse(for _: NSEvent?) -> Bool { true }
