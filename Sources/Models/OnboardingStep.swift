@@ -16,8 +16,11 @@
 enum OnboardingStep: Int, CaseIterable, Sendable {
     case welcome, feeds, sections, intelligence, notifications, done
 
+    /// The following step; nil on the last.
     var next: OnboardingStep? { Self(rawValue: rawValue + 1) }
+    /// The step before; nil on the first.
     var previous: OnboardingStep? { Self(rawValue: rawValue - 1) }
+    /// Whether this is the final step.
     var isLast: Bool { next == nil }
 
     /// "Step 2 of 6", for the page indicator and VoiceOver.
@@ -26,6 +29,7 @@ enum OnboardingStep: Int, CaseIterable, Sendable {
     /// The forward button: the last step closes the flow.
     var continueTitle: String { isLast ? "Start Reading" : "Continue" }
 
+    /// The step's heading.
     var title: String {
         switch self {
         case .welcome: return "Welcome to News"

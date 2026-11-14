@@ -37,6 +37,7 @@ struct EntityCoverageDay: Hashable, Codable, Sendable {
     let storyCount: Int
 }
 
+/// One publisher's share of an entity's stories in the dossier's window.
 struct EntityPublisherShare: Hashable, Codable, Sendable {
     let publisher: String
     let storyCount: Int
@@ -44,6 +45,7 @@ struct EntityPublisherShare: Hashable, Codable, Sendable {
     let share: Double
 }
 
+/// A recent story that names the dossier's entity.
 struct EntityStoryReference: Identifiable, Hashable, Codable, Sendable {
     /// The article's id.
     let id: String
@@ -57,18 +59,24 @@ struct RelatedEntity: Identifiable, Hashable, Codable, Sendable {
     let entity: EntityRecord
     /// Stories that name both entities: the relationship's provenance.
     let sharedStories: Int
+    /// Its Personalized PageRank score from the walk over the dossier entity's neighbourhood; higher is closer.
     let score: Double
     var id: String { entity.id }
 }
 
+/// Everything the entity dossier shows: coverage over 30 days, top publishers, recent stories and related entities.
 struct EntityDossier: Identifiable, Hashable, Codable, Sendable {
     let entity: EntityRecord
     /// Thirty days ending with the reference day, every day present, oldest first.
     let coverage: [EntityCoverageDay]
+    /// At most eight publishers, most stories first.
     let publishers: [EntityPublisherShare]
+    /// At most six stories, newest first.
     let recentStories: [EntityStoryReference]
+    /// At most eight related entities, strongest first.
     let related: [RelatedEntity]
     var id: String { entity.id }
 
+    /// Stories that name the entity within the 30-day window.
     var storiesInWindow: Int { coverage.reduce(0) { $0 + $1.storyCount } }
 }

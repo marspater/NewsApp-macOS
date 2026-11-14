@@ -45,6 +45,7 @@ enum FeedError: LocalizedError, Equatable, Sendable {
     /// A failure with no known cause.
     case unclassified(String)
 
+    /// The message shown in feed status and alerts; it names the host where that helps the reader act.
     var errorDescription: String? {
         switch self {
         case .malformedURL(let url):

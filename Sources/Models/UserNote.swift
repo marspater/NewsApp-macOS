@@ -27,8 +27,10 @@ struct UserNote: Identifiable, Sendable, Equatable {
     /// Up to `NoteAnchor.contextLength` characters on each side of the quote in its block.
     let prefix: String
     let suffix: String
+    /// The reader's note text; empty for a plain highlight.
     var noteBody = ""
     var createdAt = Date()
+    /// When the note was last saved.
     var updatedAt = Date()
 
     /// A highlight with no note text is just a highlight.
@@ -52,6 +54,7 @@ struct NotePlace {
 
 /// Places notes in the blocks of a story. Offsets count `Character`s, the unit `AttributedString` indexes by.
 enum NoteAnchor {
+    /// Characters of context kept on each side of a quote.
     static let contextLength = 32
 
     /// The note for `quote` found in `paragraphs[index]` at character offset `start`.
@@ -172,8 +175,10 @@ struct StoryAnnotationGroup: Identifiable, Sendable {
     let listings: [UserNoteListing]
     var id: String { articleID }
 
+    /// Whether the story has more than one note.
     var isMultiple: Bool { listings.count > 1 }
 
+    /// Creates a group from its story and notes, in the order given.
     init(articleID: String, articleTitle: String, source: String, listings: [UserNoteListing]) {
         self.articleID = articleID
         self.articleTitle = articleTitle

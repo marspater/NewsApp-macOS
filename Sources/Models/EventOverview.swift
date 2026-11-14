@@ -21,9 +21,12 @@ public struct EvidencePassage: Codable, Hashable, Sendable, Identifiable {
     public let id: String
     public let articleID: String
     public let text: String
+    /// SHA-256 of the trimmed passage text; citations store it so a changed passage is detected.
     public let fingerprint: String
+    /// The passage's position in its article, for a stable order; nil when unknown.
     public var ordinal: Int?
 
+    /// Creates a passage; without a `fingerprint`, it is computed from the trimmed text.
     public init(id: String, articleID: String, text: String, fingerprint: String? = nil, ordinal: Int? = nil) {
         self.id = id
         self.articleID = articleID
@@ -58,9 +61,13 @@ public struct OverviewSourceMetadata: Codable, Hashable, Sendable {
 public struct OverviewCitation: Codable, Hashable, Sendable, Identifiable {
     public let id: String
     public let articleID: String
+    /// The cited `EvidencePassage`.
     public let passageID: String
+    /// The cited passage's fingerprint when the overview was made.
     public let passageFingerprint: String
+    /// The cited text as the overview shows it.
     public let quote: String
+    /// The cited publication; nil when none was recorded.
     public var source: OverviewSourceMetadata?
 
     public var sourceTitle: String? { source?.title }
@@ -89,6 +96,10 @@ public struct OverviewCitation: Codable, Hashable, Sendable, Identifiable {
         case sourceTitle, sourceName, sourceURL, publishedAt
     }
 
+    /// Decodes the flat stored form, in which the source fields sit beside the citation's own; `source` stays nil when
+    /// none of them is present.
+    ///
+    /// - Throws: The decoder's error when a required field is missing or malformed.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try container.decode(String.self, forKey: .id)
@@ -107,6 +118,7 @@ public struct OverviewCitation: Codable, Hashable, Sendable, Identifiable {
         }
     }
 
+    /// Encodes the flat stored form, writing only the source fields that are present.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
@@ -125,6 +137,7 @@ public struct OverviewCitation: Codable, Hashable, Sendable, Identifiable {
 public struct OverviewFact: Codable, Hashable, Sendable, Identifiable {
     public let id: String
     public let text: String
+    /// The citations that support the claim.
     public let citationIDs: [String]
 
     public init(id: String, text: String, citationIDs: [String]) {
@@ -139,6 +152,7 @@ public struct OverviewLeadImage: Codable, Hashable, Sendable {
     public let url: String
     public var caption: String?
     public var credit: String?
+    /// The article the image came from; nil when not recorded.
     public var sourceArticleID: String?
 
     public init(url: String, caption: String? = nil, credit: String? = nil, sourceArticleID: String? = nil) {
@@ -152,7 +166,9 @@ public struct OverviewLeadImage: Codable, Hashable, Sendable {
 /// Clearly labeled modes for reading an event: either the synthesized event overview
 /// or the underlying original source publication.
 public enum ReaderExperienceMode: String, CaseIterable, Sendable, Identifiable {
+    /// The sourced overview of the whole event.
     case eventOverview = "Event overview"
+    /// The publisher's own article.
     case sourcePublication = "Source publication"
 
     public var id: String { rawValue }
@@ -195,8 +211,11 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
     public let datePrecision: DatePrecision?
     public let summary: String
     public let citationIDs: [String]
+    /// Whether the item states something planned rather than something that happened.
     public let isFuturePlan: Bool
+    /// The full date the source states for the event; nil for a partial date, an anchor or a publication date.
     public let eventDate: Date?
+    /// The article's publication date, for a `publication` item.
     public let publicationDate: Date?
     /// Ordering only: where a stated date falls in time, for filtering and sorting (Briefing). A date the source
     /// states without a year holds an inferred year here, so this value must never be formatted for display;
@@ -296,6 +315,7 @@ extension OverviewTimelineItem {
         return expression
     }()
 
+    /// A UTC Gregorian calendar for reading dates stored before #1241.
     static let legacyCalendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC") ?? calendar.timeZone
@@ -321,10 +341,14 @@ extension OverviewTimelineItem {
 /// A participant or publisher perspective with clearly attributed stance or statement.
 public struct OverviewPerspective: Codable, Hashable, Sendable, Identifiable {
     public let id: String
+    /// The person or body whose position this is.
     public let participant: String
+    /// Their stance or statement, as the sources report it.
     public let position: String
     public let citationIDs: [String]
+    /// The publisher that reported the position; nil when not recorded.
     public let sourcePublisher: String?
+    /// The wire agency the publisher credits for the report; nil when none.
     public let originalWireSource: String?
 
     public init(
@@ -389,8 +413,11 @@ public struct OverviewIndustryImpact: Codable, Hashable, Sendable, Identifiable 
 
 /// Optional evaluated tone of coverage; omitted when evidence or corpus evaluation does not justify it.
 public struct OverviewCoverageSentiment: Codable, Hashable, Sendable {
+    /// The tone score the evaluation gave the coverage.
     public let score: Double
+    /// The tone in words.
     public let label: String
+    /// How sure the evaluation is, 0 ... 1.
     public let confidence: Double
     public let rationale: String?
 
@@ -412,6 +439,7 @@ public struct OverviewEvidenceSections: Codable, Hashable, Sendable {
     public let thematicAngle: OverviewThematicAngle?
     public let coverageSentiment: OverviewCoverageSentiment?
 
+    /// True when no section has content: no introduction claims, timeline, perspectives, impact, angle or sentiment.
     public var isEmpty: Bool {
         introduction?.isEmpty != false && timeline.isEmpty && perspectives.isEmpty && industryImpact.isEmpty
             && thematicAngle == nil && coverageSentiment == nil
@@ -473,15 +501,21 @@ public struct OverviewEvidenceSections: Codable, Hashable, Sendable {
 
 /// Generation mode for an event overview.
 public enum OverviewKind: String, Codable, Sendable, Equatable, Hashable {
+    /// Includes text the on-device model wrote over the excerpt overview.
     case synthesized
+    /// Built from publisher excerpts alone, with no model-written text; a model generation change leaves it current.
     case fallbackExcerpts
 }
 
 /// Versioning and input binding context for an event overview document.
 public struct OverviewVersionContext: Codable, Hashable, Sendable {
+    /// The event's membership version the overview was made for.
     public let membershipVersion: Int
+    /// `EventOverviewDocument.computeInputTextHash(passages:)` of the passages it was made from.
     public let inputTextHash: String
+    /// The stored document layout version.
     public let schemaVersion: Int
+    /// The generation rules version; a lower one than `currentAnalysisVersion` is regenerated.
     public let analysisVersion: Int
 
     public init(
@@ -506,6 +540,7 @@ public struct OverviewContent: Codable, Hashable, Sendable {
     public let leadImage: OverviewLeadImage?
     public let evidenceSections: OverviewEvidenceSections?
 
+    /// Creates the content, indexing the citations by ID; a later citation replaces an earlier one with the same ID.
     public init(
         title: String,
         summary: String,
@@ -527,6 +562,7 @@ public struct OverviewContent: Codable, Hashable, Sendable {
 
 /// Origin, membership scope, and lifecycle timestamps for an overview document.
 public struct OverviewProvenance: Codable, Hashable, Sendable {
+    /// The event's members when the overview was made.
     public let memberArticleIDs: [String]
     public let kind: OverviewKind
     public let createdAt: Date
@@ -547,6 +583,7 @@ public struct OverviewProvenance: Codable, Hashable, Sendable {
 
 /// Derived overview document model bound to membership version, input text hashes, schema version, and analysis version.
 public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
+    /// The stored document layout version this build writes.
     public static let currentSchemaVersion = 1
     /// 5: attributed straight/typographic quotations with both post-quote speaker orders. 7: reported speech
     /// attribution guards (preposition context, verb/relative exclusions, time phrases). 8: publisher-excerpt overviews
@@ -571,6 +608,7 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     public var analysisVersion: Int { version.analysisVersion }
     public var title: String { content.title }
     public var summary: String { content.summary }
+    /// Every cited claim: the introduction's sentences, then the facts.
     public var allClaims: [OverviewFact] { (content.evidenceSections?.introduction ?? []) + facts }
     public var facts: [OverviewFact] { content.facts }
     public var citations: [String: OverviewCitation] { content.citations }
@@ -606,6 +644,9 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
         case evidenceSections
     }
 
+    /// Decodes the flat stored form, in which version, content and provenance fields sit side by side.
+    ///
+    /// - Throws: The decoder's error when a required field is missing or malformed.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try container.decode(String.self, forKey: .id)
@@ -646,6 +687,7 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
         )
     }
 
+    /// Encodes the flat stored form; the lead image and evidence sections only when present.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)

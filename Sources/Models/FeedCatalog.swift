@@ -18,6 +18,7 @@ import Foundation
 /// and retire feeds, so live state comes from the feed's own health after subscribing, never from this record.
 /// Subscribing is always an explicit choice; nothing here is subscribed automatically.
 struct CatalogFeed: Identifiable, Equatable, Sendable {
+    /// The feed's main subject.
     enum Topic: String, CaseIterable, Sendable {
         case general, politics, business, technology, science, health, culture, food, lifestyle
     }
@@ -58,6 +59,7 @@ enum CatalogSet: String, CaseIterable, Identifiable, Hashable, Sendable {
     /// Sets with at least one feed in a supported language; parked sets are not shown.
     static var offered: [CatalogSet] { allCases.filter { !FeedCatalog.feeds(in: $0).isEmpty } }
 
+    /// The set's name in the catalog.
     var title: String {
         switch self {
         case .world: return "World news"
@@ -72,6 +74,7 @@ enum CatalogSet: String, CaseIterable, Identifiable, Hashable, Sendable {
         }
     }
 
+    /// One sentence on what the set covers.
     var summary: String {
         switch self {
         case .world: return "International news from public broadcasters and major newsrooms, in English."
@@ -87,6 +90,7 @@ enum CatalogSet: String, CaseIterable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// The curated starter feeds and the maintainer advisories about them.
 enum FeedCatalog {
     /// Date the entries below were last fetched and checked for freshness, parseability and access.
     static let verifiedOn = "2026-10-31"
@@ -95,6 +99,7 @@ enum FeedCatalog {
     /// the other catalog languages (#264), so their entries stay below but are parked until it does.
     static let supportedLanguages: Set<String> = ["en"]
 
+    /// The offered feeds of a set; parked languages are left out.
     static func feeds(in set: CatalogSet) -> [CatalogFeed] {
         feeds.filter { $0.set == set }
     }
@@ -195,6 +200,7 @@ enum FeedCatalog {
         CatalogReviewEngine.alternatives(for: url, advisory: advisory(for: url), catalog: feeds)
     }
 
+    /// Every catalog entry, parked languages included; `feeds` holds the offered ones.
     static let allFeeds: [CatalogFeed] = [
         CatalogFeed(
             id: "bbc-world", title: "BBC News · World", publisher: "BBC News",

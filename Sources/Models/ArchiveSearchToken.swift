@@ -16,9 +16,11 @@ import Foundation
 
 /// One search-field chip. ArticleFilterQuery remains the authority for archive filtering.
 struct ArchiveSearchToken: Hashable, Identifiable {
+    /// The operator as typed and parsed, such as `is:unread` or `source:bbc.co.uk`, lowercased when completed.
     let expression: String
     var id: String { expression }
 
+    /// The chip's label: "Unread", "Read", "Saved", "Source: …" or "Category: …"; other expressions show as typed.
     var displayName: String {
         if expression == "is:unread" { return "Unread" }
         if expression == "is:read" { return "Read" }
@@ -32,6 +34,7 @@ struct ArchiveSearchToken: Hashable, Identifiable {
         return expression
     }
 
+    /// The SF Symbol shown on the chip for its operator.
     var systemImage: String {
         if expression == "is:unread" { return "circle.circle" }
         if expression == "is:read" { return "checkmark.circle" }
@@ -41,6 +44,7 @@ struct ArchiveSearchToken: Hashable, Identifiable {
         return "magnifyingglass"
     }
 
+    /// Creates a chip for an expression as given, without validating it.
     init(expression: String) {
         self.expression = expression
     }
@@ -72,6 +76,7 @@ struct ArchiveSearchToken: Hashable, Identifiable {
             .map(\.element)
     }
 
+    /// The archive query the field stands for: the chips' expressions, then the trimmed free text, space-separated.
     static func query(text: String, tokens: [ArchiveSearchToken]) -> String {
         (tokens.map(\.expression) + [text.trimmingCharacters(in: .whitespacesAndNewlines)])
             .filter { !$0.isEmpty }

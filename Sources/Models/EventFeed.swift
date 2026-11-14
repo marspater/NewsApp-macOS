@@ -27,6 +27,7 @@ struct EventMatchRow: Hashable, Sendable {
     let source: String
     /// Publication date, or ingestion time for undated articles.
     let date: Date
+    /// The article's current event; nil when no event holds it.
     let eventID: String?
     /// A matcher version processed the article since its title and description last changed.
     var previouslyMatched = false
@@ -34,13 +35,17 @@ struct EventMatchRow: Hashable, Sendable {
 
 /// A matcher decision, applied by the database only if the state it was made against still holds.
 enum EventMatchDecision: Hashable, Sendable {
+    /// Join this event, if its membership version is still `expectedVersion`.
     case join(eventID: String, expectedVersion: Int)
     /// A new event with these still unassigned partners.
     case create(with: [String])
 }
 
+/// What the database did with an `EventMatchDecision`.
 enum EventMatchOutcome: Hashable, Sendable {
+    /// The article joined the event with this ID.
     case joined(String)
+    /// A new event with this ID holds the article and its partners.
     case created(String)
     /// Something changed since the decision was made; nothing was written.
     case conflict
@@ -48,6 +53,7 @@ enum EventMatchOutcome: Hashable, Sendable {
 
 // MARK: - Feed presentation
 
+/// Whether the story list groups reports into event cards.
 enum FeedGroupingMode: String, Sendable {
     /// One card per confirmed event.
     case events
@@ -55,11 +61,13 @@ enum FeedGroupingMode: String, Sendable {
     case publications
 }
 
+/// One visible report of an event, with the state its feed card shows.
 struct EventFeedMember: Hashable, Sendable {
     let articleID: String
     let source: String
     let title: String
     let date: Date
+    /// The story version at which the report joined; above the seen version, it is new to the reader.
     let joinedVersion: Int
     let isRead: Bool
     let isSaved: Bool
@@ -68,8 +76,11 @@ struct EventFeedMember: Hashable, Sendable {
 /// What a feed card needs to know about an event: its visible members (newest first) and the
 /// version the reader last saw. Reading state of the event never changes article state.
 struct EventFeedSummary: Hashable, Sendable {
+    /// The story's lead event, which names the summary.
     let eventID: String
+    /// The sum of the story's events' membership versions.
     let membershipVersion: Int
+    /// The sum of the story's events' seen versions; nil when the reader never opened any of them.
     let seenVersion: Int?
     let members: [EventFeedMember]
     /// The opened event's own membership version, which versions its overview. `membershipVersion` sums the
@@ -85,6 +96,7 @@ struct EventFeedSummary: Hashable, Sendable {
         return members.map { Self.displaySource($0.source) }.filter { seen.insert($0.lowercased()).inserted }
     }
 
+    /// The newest member's date; nil without members.
     var latestDate: Date? { members.map(\.date).max() }
 
     /// The one definition of "Developing" for Today and the Briefing: a confirmed event whose latest report is from
@@ -123,23 +135,28 @@ struct EventFeedSummary: Hashable, Sendable {
         "\(members.count) \(members.count == 1 ? "story" : "stories") · \(sources.count) \(sources.count == 1 ? "publisher" : "publishers")"
     }
 
+    /// The first line of a stored source, trimmed: the publisher name a card shows.
     static func displaySource(_ source: String) -> String {
         (source.components(separatedBy: "\n").first ?? source).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// A headline reduced to its lowercased words by `MuteRules.phrase(_:)`, so reprints of one headline compare equal.
     static func titleKey(_ title: String) -> String {
         MuteRules.phrase(title)
     }
 }
 
+/// One card of the story list: a single report or a confirmed event.
 enum FeedEntry: Identifiable, Hashable, Sendable {
     case article(FeedArticle)
     /// `representative` is the first member in the current list order, so filters that keep a
     /// publication always keep it visible as the card's own article.
     case event(EventFeedSummary, representative: FeedArticle, visibleMembers: [FeedArticle])
 
+    /// The representative article's ID, so a card keeps its identity when it turns into an event card.
     var id: String { representative.id }
 
+    /// The article the card shows: the report itself, or the event's first listed member.
     var representative: FeedArticle {
         switch self {
         case .article(let article): return article
@@ -147,6 +164,7 @@ enum FeedEntry: Identifiable, Hashable, Sendable {
         }
     }
 
+    /// The listed articles the card stands for.
     var visibleArticles: [FeedArticle] {
         switch self {
         case .article(let article): return [article]
@@ -155,6 +173,7 @@ enum FeedEntry: Identifiable, Hashable, Sendable {
     }
 }
 
+/// Turns a filtered, ordered story list into feed cards.
 enum EventFeedGrouping {
     /// Groups an already filtered, ordered list. Grouping never removes a listed article: each
     /// confirmed event appears once, at its first listed member, with that member on the card.
@@ -209,19 +228,23 @@ enum EventFeedGrouping {
     }
 }
 
+/// A loaded page of stories with the event summaries of its articles.
 struct FeedSnapshot: Equatable, Sendable {
     var articles: [FeedArticle] = []
     var events: [EventFeedSummary] = []
 
+    /// The snapshot's cards in `mode`.
     func entries(_ mode: FeedGroupingMode) -> [FeedEntry] {
         EventFeedGrouping.entries(for: articles, events: events, mode: mode)
     }
 
+    /// The IDs of the snapshot's cards in `mode`, without building them.
     func entryIDs(_ mode: FeedGroupingMode) -> [String] {
         EventFeedGrouping.entryIDs(for: articles, events: events, mode: mode)
     }
 }
 
+/// What `FeedUpdateBuffer.receive(_:holding:mode:hasMore:)` did with a refreshed page.
 enum FeedUpdateResult: Equatable, Sendable {
     /// The refreshed page replaced the list.
     case replaced
@@ -234,7 +257,9 @@ enum FeedUpdateResult: Equatable, Sendable {
 /// Keeps the list still while it is being read. Refreshed results that would move, add or remove
 /// cards wait behind an explicit update; content of cards that stay is refreshed in place.
 struct FeedUpdateBuffer: Equatable, Sendable {
+    /// The stories on screen.
     private(set) var displayed = FeedSnapshot()
+    /// A refreshed page that would move cards, waiting for the reader; nil when none waits.
     private(set) var pending: FeedSnapshot?
     /// A subscription's refresh finished while an article was open: closing the reader shows it (#782).
     var holdsSubscription = false
@@ -246,6 +271,7 @@ struct FeedUpdateBuffer: Equatable, Sendable {
         holdsSubscription = false
     }
 
+    /// Shows the waiting update, if there is one.
     mutating func applyPending() {
         guard let pending else { return }
         replace(with: pending)
@@ -274,6 +300,7 @@ struct FeedUpdateBuffer: Equatable, Sendable {
     /// fresh values in place, so a story updated today can end "only earlier days" while the wait is still on:
     /// the wait is remembered here until the list is replaced.
     struct NewDayHandoff: Equatable, Sendable {
+        /// Whether the list waits to hand over to the grouped page.
         private(set) var isWaiting = false
 
         /// Call before each refreshed page is received. `wasGroupingAtFetch`: the grouping was running when that page
@@ -365,17 +392,23 @@ struct FeedUpdateBuffer: Equatable, Sendable {
 
 /// Existing local signals; selecting a Briefing never runs an importance model.
 struct BriefingPriority: Equatable, Sendable {
+    /// Distinct publishers on the story's event; 1 for a story outside any event.
     var sourceCount = 1
     var importance: StoryImportance?
+    /// The story's event; the Briefing takes one story per event.
     var eventID: String? = nil
 }
 
 /// A daily edition, after Kagi News: selected once per day at the edition hour and frozen until the next edition
 /// or until the reader asks for a new one; ordinary refresh is independent. Every window shows the same edition.
 struct FiniteBriefing: Equatable, Sendable {
+    /// Stories in one edition.
     static let maximumStories = 10
+    /// The newest unread stories of the last 24 hours an edition chooses from.
     static let candidateLimit = 500
+    /// How far back an edition looks for candidates, and how long it lasts.
     static let duration: TimeInterval = 24 * 60 * 60
+    /// The local hour a new edition is due when the reader has not chosen one.
     static let defaultEditionHour = 7
 
     let startedAt: Date
@@ -429,6 +462,9 @@ struct FiniteBriefing: Equatable, Sendable {
         return notified.union(edition).filter { !read.contains($0) }.count
     }
 
+    /// Selects a new edition from the candidates, one story at a time: at most two per publisher and one per event,
+    /// ranked by `rank(priority:interest:sourceCount:categoryCount:)`. Read stories and stories older than `duration`
+    /// or dated in the future are not candidates.
     init(
         candidates: [FeedArticle], readIDs: Set<String>, now: Date = Date(),
         priorities: [String: BriefingPriority] = [:], interests: [String: Int] = [:]
@@ -496,6 +532,8 @@ struct FiniteBriefing: Equatable, Sendable {
         ]
     }
 
+    /// How many of the edition's stories are read.
     func readCount(_ readIDs: Set<String>) -> Int { articles.filter { readIDs.contains($0.id) }.count }
+    /// Whether the edition has stories and every one is read.
     func isComplete(_ readIDs: Set<String>) -> Bool { !articles.isEmpty && readCount(readIDs) == articles.count }
 }

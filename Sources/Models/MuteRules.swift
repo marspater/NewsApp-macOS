@@ -22,6 +22,7 @@ import Foundation
 struct MuteRules: Equatable, Hashable, Sendable {
     /// Rules kept per kind; muting is a short personal list, and every listed story is checked against all of them.
     static let limit = 200
+    /// The longest topic accepted, in characters after whitespace is collapsed.
     static let topicLength = 80
 
     /// Normalized publisher hostnames, such as `example.com`.
@@ -31,12 +32,15 @@ struct MuteRules: Equatable, Hashable, Sendable {
     /// Identifiers of the fixed topic sets the reader switched on (`MuteTopicSet.all`), in the order switched on.
     private(set) var topicSets: [String] = []
 
+    /// Creates rules through the same validation as the add methods, so invalid, duplicate and over-limit entries are
+    /// dropped.
     init(sources: [String] = [], topics: [String] = [], topicSets: [String] = []) {
         for source in sources { addSource(source) }
         for topic in topics { addTopic(topic) }
         for id in topicSets { addTopicSet(id) }
     }
 
+    /// True when nothing is muted.
     var isEmpty: Bool { sources.isEmpty && topics.isEmpty && topicSets.isEmpty }
 
     // MARK: - Editing
@@ -63,10 +67,12 @@ struct MuteRules: Equatable, Hashable, Sendable {
         return topic
     }
 
+    /// Removes a muted host, matched exactly as stored.
     mutating func removeSource(_ host: String) {
         sources.removeAll { $0 == host }
     }
 
+    /// Removes a muted topic, matched exactly as stored.
     mutating func removeTopic(_ topic: String) {
         topics.removeAll { $0 == topic }
     }
@@ -79,20 +85,24 @@ struct MuteRules: Equatable, Hashable, Sendable {
         return true
     }
 
+    /// Switches a fixed topic set off.
     mutating func removeTopicSet(_ id: String) {
         topicSets.removeAll { $0 == id }
     }
 
     // MARK: - Matching
 
+    /// Whether any source, topic or topic-set rule covers the article.
     func mutes(_ article: FeedArticle) -> Bool {
         mutesSource(link: article.link) || mutesTopic(title: article.title, description: article.description)
     }
 
+    /// Whether a muted host covers the host of `link`.
     func mutesSource(link: String) -> Bool {
         Self.sourceList(sourceParameter, mutes: link)
     }
 
+    /// Whether a muted topic or a phrase of a switched-on set appears as whole words in the headline or summary.
     func mutesTopic(title: String, description: String) -> Bool {
         Self.topicList(topicParameter, mutes: title + "\n" + description)
     }
@@ -160,6 +170,7 @@ struct MuteRules: Equatable, Hashable, Sendable {
             .split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
     }
 
+    /// The text's `words(_:)` joined by single spaces: the normalized form topic rules compare.
     static func phrase(_ text: String) -> String {
         words(text).joined(separator: " ")
     }
@@ -197,6 +208,7 @@ struct MuteTopicSet: Identifiable, Equatable, Sendable {
     let title: String
     let phrases: [String]
 
+    /// "No AI, Please": common names and terms for artificial intelligence, its products and companies.
     static let artificialIntelligence = MuteTopicSet(
         id: "artificial-intelligence", title: "No AI, Please",
         phrases: [
@@ -206,14 +218,19 @@ struct MuteTopicSet: Identifiable, Equatable, Sendable {
             "Copilot", "DeepSeek", "Grok", "Midjourney", "Perplexity", "xAI",
         ])
 
+    /// Every set the app ships.
     static let all = [artificialIntelligence]
 
+    /// The shipped set with this ID; nil for an unknown one.
     static func named(_ id: String) -> MuteTopicSet? { all.first { $0.id == id } }
 }
 
 /// Stories each rule covers in the stored library, for the muting settings.
 struct MuteRuleCounts: Equatable, Sendable {
+    /// Muted host → stories it covers.
     var sources: [String: Int] = [:]
+    /// Muted topic → stories it covers.
     var topics: [String: Int] = [:]
+    /// Topic set ID → stories it covers.
     var topicSets: [String: Int] = [:]
 }
