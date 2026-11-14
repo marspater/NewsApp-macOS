@@ -270,6 +270,7 @@ struct MainView: View {
                 detailDestination(for: wrap)
             }
         }
+        .modifier(DiagnosticOutsideInspector())  // #1328 diagnostic only
     }
 
     @ViewBuilder

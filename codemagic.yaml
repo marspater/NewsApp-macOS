@@ -1,5 +1,5 @@
 workflows:
-  # #1328 diagnostic only, never merged: the four crashing flows with and without the annotations inspector.
+  # #1328 diagnostic only, never merged: the crashing reader flows with option A, and with option B on top of it.
   diag-1328:
     name: Diagnostic 1328 reader crash
     instance_type: mac_mini_m2
@@ -15,22 +15,42 @@ workflows:
           set -o pipefail
           xcodebuild build-for-testing -project News.xcodeproj -scheme News -destination 'platform=macOS' \
             -derivedDataPath build/DerivedData -testPlan UITests -quiet
-      - name: Crashing flows as on main
+      - name: Option A alone
         script: |
           xcodebuild test-without-building -project News.xcodeproj -scheme News -destination 'platform=macOS' \
             -derivedDataPath build/DerivedData -testPlan UITests \
             -only-testing:NewsUITests/NewsSmokeUITests/test04OpenArticle \
+            -only-testing:NewsUITests/NewsSmokeUITests/test05SaveStoryAppearsUnderSaved \
             -only-testing:NewsUITests/NewsSmokeUITests/test07AccessibilityTreeWithImageCredit \
-            -resultBundlePath build/ci/main.xcresult 2>&1 | grep -E "DIAG1328|Test Case|error|crashed|passed|failed" || true
-          ditto -c -k --keepParent build/ci/main.xcresult build/ci/main.xcresult.zip || true
-      - name: Crashing flows without the inspector
+            -resultBundlePath build/ci/optionA.xcresult 2>&1 | grep -E "DIAG1328|Test Case|error|crashed|passed|failed" || true
+          ditto -c -k --keepParent build/ci/optionA.xcresult build/ci/optionA.xcresult.zip || true
+      - name: Option A and B, inspector closed
         script: |
-          TEST_RUNNER_NEWS_DIAG_NO_INSPECTOR=1 xcodebuild test-without-building -project News.xcodeproj -scheme News \
-            -destination 'platform=macOS' -derivedDataPath build/DerivedData -testPlan UITests \
+          TEST_RUNNER_NEWS_DIAG_INSPECTOR_OUTSIDE=1 xcodebuild test-without-building -project News.xcodeproj -scheme News -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData -testPlan UITests \
             -only-testing:NewsUITests/NewsSmokeUITests/test04OpenArticle \
+            -only-testing:NewsUITests/NewsSmokeUITests/test05SaveStoryAppearsUnderSaved \
             -only-testing:NewsUITests/NewsSmokeUITests/test07AccessibilityTreeWithImageCredit \
-            -resultBundlePath build/ci/noinspector.xcresult 2>&1 | grep -E "DIAG1328|Test Case|error|crashed|passed|failed" || true
-          ditto -c -k --keepParent build/ci/noinspector.xcresult build/ci/noinspector.xcresult.zip || true
+            -resultBundlePath build/ci/optionB-closed.xcresult 2>&1 | grep -E "DIAG1328|Test Case|error|crashed|passed|failed" || true
+          ditto -c -k --keepParent build/ci/optionB-closed.xcresult build/ci/optionB-closed.xcresult.zip || true
+      - name: Option A and B, inspector open
+        script: |
+          TEST_RUNNER_NEWS_DIAG_INSPECTOR_OUTSIDE=1 TEST_RUNNER_NEWS_DIAG_OPEN_INSPECTOR=1 xcodebuild test-without-building -project News.xcodeproj -scheme News -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData -testPlan UITests \
+            -only-testing:NewsUITests/NewsSmokeUITests/test04OpenArticle \
+            -only-testing:NewsUITests/NewsSmokeUITests/test05SaveStoryAppearsUnderSaved \
+            -only-testing:NewsUITests/NewsSmokeUITests/test07AccessibilityTreeWithImageCredit \
+            -resultBundlePath build/ci/optionB-open.xcresult 2>&1 | grep -E "DIAG1328|Test Case|error|crashed|passed|failed" || true
+          ditto -c -k --keepParent build/ci/optionB-open.xcresult build/ci/optionB-open.xcresult.zip || true
+      - name: Option A, inspector open in the stack
+        script: |
+          TEST_RUNNER_NEWS_DIAG_OPEN_INSPECTOR=1 xcodebuild test-without-building -project News.xcodeproj -scheme News -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData -testPlan UITests \
+            -only-testing:NewsUITests/NewsSmokeUITests/test04OpenArticle \
+            -only-testing:NewsUITests/NewsSmokeUITests/test05SaveStoryAppearsUnderSaved \
+            -only-testing:NewsUITests/NewsSmokeUITests/test07AccessibilityTreeWithImageCredit \
+            -resultBundlePath build/ci/optionA-open.xcresult 2>&1 | grep -E "DIAG1328|Test Case|error|crashed|passed|failed" || true
+          ditto -c -k --keepParent build/ci/optionA-open.xcresult build/ci/optionA-open.xcresult.zip || true
     artifacts:
       - build/ci/*.xcresult.zip
   news-arm64-verification:

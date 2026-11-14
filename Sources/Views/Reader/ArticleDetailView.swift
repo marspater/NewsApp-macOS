@@ -2194,16 +2194,56 @@ struct ArticleNavigationCommands: ViewModifier {
     }
 }
 
-// #1328 diagnostic only, never merged: NEWS_DIAG_NO_INSPECTOR removes the annotations inspector's split column.
+// #1328 diagnostic only, never merged.
+// NEWS_DIAG_NO_INSPECTOR removes the annotations inspector; NEWS_DIAG_INSPECTOR_OUTSIDE moves it onto the detail
+// NavigationStack in MainView (option B); NEWS_DIAG_OPEN_INSPECTOR opens it when the reader appears.
+@MainActor
+@Observable
+final class DiagnosticReaderInspector {
+    static let shared = DiagnosticReaderInspector()
+    static let environment = ProcessInfo.processInfo.environment
+    static let removed = environment["NEWS_DIAG_NO_INSPECTOR"] != nil
+    static let outside = environment["NEWS_DIAG_INSPECTOR_OUTSIDE"] != nil
+    static let openOnAppear = environment["NEWS_DIAG_OPEN_INSPECTOR"] != nil
+    var isPresented = false
+    var content: AnyView?
+}
+
+struct DiagnosticOutsideInspector: ViewModifier {
+    @State private var model = DiagnosticReaderInspector.shared
+
+    func body(content: Content) -> some View {
+        if DiagnosticReaderInspector.outside {
+            @Bindable var model = model
+            content.inspector(isPresented: $model.isPresented) { model.content ?? AnyView(EmptyView()) }
+        } else {
+            content
+        }
+    }
+}
+
 extension View {
     @ViewBuilder
     func diagnosticInspector<Content: View>(
-        isPresented: Binding<Bool>, @ViewBuilder content: () -> Content
+        isPresented: Binding<Bool>, @ViewBuilder content: @escaping () -> Content
     ) -> some View {
-        if ProcessInfo.processInfo.environment["NEWS_DIAG_NO_INSPECTOR"] != nil {
+        if DiagnosticReaderInspector.removed {
             self
+        } else if DiagnosticReaderInspector.outside {
+            self
+                .onAppear {
+                    DiagnosticReaderInspector.shared.content = AnyView(content())
+                    if DiagnosticReaderInspector.openOnAppear { isPresented.wrappedValue = true }
+                    DiagnosticReaderInspector.shared.isPresented = isPresented.wrappedValue
+                }
+                .onChange(of: isPresented.wrappedValue) { _, shown in
+                    DiagnosticReaderInspector.shared.content = AnyView(content())
+                    DiagnosticReaderInspector.shared.isPresented = shown
+                }
+                .onDisappear { DiagnosticReaderInspector.shared.isPresented = false }
         } else {
             inspector(isPresented: isPresented, content: content)
+                .onAppear { if DiagnosticReaderInspector.openOnAppear { isPresented.wrappedValue = true } }
         }
     }
 }
