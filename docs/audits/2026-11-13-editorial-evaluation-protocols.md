@@ -107,7 +107,7 @@ The same display constraints apply to both experimental arms. Z2's activity comp
 
 Insufficient evidence is inconclusive, not passed. A pass recommends a Lead trial to Epic Z (#932); it changes no shipped default by itself, and Z's validation stage decides when a trial can run.
 
-The harness that produces the arms lives in the evaluation tests and scripts only; nothing under `Sources/` changes for it.
+The harness that produces the arms lives in the evaluation tests and scripts only (`Tests/EditorialRankingEvaluation.swift`, called from the `--today-shadow` run by `script/today_lead.sh arms`; its fixture smoke check runs with the ranking atom and `script/test_editorial_ranking.sh`); nothing under `Sources/` changes for it. How to run it is in `docs/TOOLING.md`, "The three-arm run".
 
 ## 6. Numeric gates — agreed 13 November 2026
 
