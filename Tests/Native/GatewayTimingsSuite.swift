@@ -98,7 +98,7 @@ extension NativeSuites.GatewayTimingsSuite {
         let proxy = NetworkBoundaryProxy(
             resolver: { _ in .allowed(ips: ["93.184.216.34"]) },
             connector: { _, _ in NWConnection(host: "127.0.0.1", port: port, using: .tcp) })
-        let (client, reply) = try await NewsTests.socksConnect(proxy, host: host)
+        let (client, reply) = try await NativeSuites.SocketSuite.socksConnect(proxy, host: host)
         expectTrue(reply[1] == 0, "the tunnel connects")
         // The helpers time out and cancel the connection, so a missing echo fails the check instead of waiting
         // for the relay's idle timeout.
