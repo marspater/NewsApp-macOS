@@ -38,10 +38,10 @@ import dnssd
 /// error), with each `assertEqual`/`assertTrue`/`assertFalse` turned into the matching `expect` helper of
 /// NativeExpectations.swift and each force unwrap in a throwing scope into `#require` (the runner log is invisible to
 /// Swift Testing), so a failure is recorded and later tests still run. The runner gives the atom its own serial lane;
-/// here `NativeSuites` runs one test at a time. Helpers that assert (`eventually`, `socksConnect`,
-/// `holdCancellationResponse`, `verifyWebKitBoundary`) have native copies below; the rest stay in SocketTests.swift and
-/// NewsTestSupport.swift, which other native suites reach through `NewsTests`. The runner keeps its copy until CI shows
-/// parity.
+/// here `NativeSuites` runs one test at a time. Helpers that assert have native copies: `eventually`,
+/// `holdCancellationResponse` and `verifyWebKitBoundary` below, `socksConnect` in NativeSocketSupport.swift. The rest
+/// stay in SocketTests.swift and NewsTestSupport.swift, which other native suites reach through `NewsTests`. The runner
+/// keeps its copy until CI shows parity.
 extension NativeSuites {
     @Suite(.tags(.socket, .integration)) struct SocketSuite {
         @Test @MainActor func gatewayRejectionIsTransport() async throws {
@@ -73,49 +73,6 @@ extension NativeSuites.SocketSuite {
             }
             try? await Task.sleep(for: .milliseconds(5))
         }
-    }
-
-    /// `NewsTests.socksConnect`, recording its greeting check through Swift Testing instead of the runner's log.
-    static func socksConnect(_ proxy: NetworkBoundaryProxy, host: String, command: UInt8 = 1, port: UInt16 = 80)
-        async throws -> (NWConnection, Data)
-    {
-        let endpoint: UInt16
-        do { endpoint = try await proxy.port() } catch {
-            throw NewsTests.loopbackFailure("listener start (NetworkBoundaryProxy, port .any)", error)
-        }
-        let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: endpoint)!, using: .tcp)
-        // A loopback connect can fail with EADDRINUSE when parallel runs churn ephemeral ports. NWConnection
-        // then parks in .waiting and never completes a send, so surface that state instead of hanging.
-        do {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                let once = NewsTests.SocketObservation()
-                client.stateUpdateHandler = { state in
-                    switch state {
-                    case .ready: if once.claim() { continuation.resume() }
-                    case .waiting(let error), .failed(let error):
-                        if once.claim() { continuation.resume(throwing: error) }
-                    case .cancelled: if once.claim() { continuation.resume(throwing: CancellationError()) }
-                    default: break
-                    }
-                }
-                client.start(queue: .global())
-            }
-        } catch {
-            client.stateUpdateHandler = nil
-            client.cancel()
-            throw NewsTests.loopbackFailure("connect to 127.0.0.1:\(endpoint)", error)
-        }
-        client.stateUpdateHandler = nil
-        try await NewsTests.socketSend(client, Data([5, 1, 0]))
-        expectEqual(try await NewsTests.socketRead(client, count: 2), Data([5, 0]), "SOCKS greeting succeeds")
-        let hostBytes = Data(host.utf8)
-        var request = Data([5, command, 0, 3, UInt8(hostBytes.count)])
-        request.append(hostBytes)
-        request.append(contentsOf: [UInt8(port >> 8), UInt8(port & 255)])
-        // Fragment across every protocol boundary, not just a single network packet.
-        try await NewsTests.socketSend(client, Data(request.prefix(1)))
-        try await NewsTests.socketSend(client, Data(request.dropFirst()))
-        return (client, try await NewsTests.socketRead(client, count: 10))
     }
 
     /// Upstream failures reach `URLSession` only as the gateway's SOCKS rejection, so this runs the real gateway and
@@ -274,7 +231,7 @@ extension NativeSuites.SocketSuite {
                 return NWConnection(host: "127.0.0.1", port: upstreamPort, using: .tcp)
             })
         let started = ContinuousClock.now
-        let (client, reply) = try await socksConnect(proxy, host: "dual.invalid")
+        let (client, reply) = try await NativeSuites.socksConnect(proxy, host: "dual.invalid")
         let elapsed = ContinuousClock.now - started
         expectEqual(reply[1], 0, "The second address connects while the first is still waiting")
         expectTrue(elapsed < .seconds(5), "The fallback takes about a quarter second, not the handshake timeout")
@@ -303,7 +260,7 @@ extension NativeSuites.SocketSuite {
                 return NWConnection(host: "127.0.0.1", port: upstreamPort, using: .tcp)
             })
         let crowdedStart = ContinuousClock.now
-        let (crowdedClient, crowdedReply) = try await socksConnect(crowded, host: "crowded.invalid")
+        let (crowdedClient, crowdedReply) = try await NativeSuites.socksConnect(crowded, host: "crowded.invalid")
         expectEqual(crowdedReply[1], 0, "The fourth address connects while three attempts stall")
         expectTrue(ContinuousClock.now - crowdedStart < .seconds(5), "Stalled attempts do not hold the fourth address")
         expectEqual(tried.hosts.count, 4, "Each address was tried once")
@@ -346,7 +303,7 @@ extension NativeSuites.SocketSuite {
             observed.record(host)
             return NWConnection(host: "127.0.0.1", port: port, using: .tcp)
         })
-        let (halfClosed, reply) = try await socksConnect(proxy, host: "93.184.216.34")
+        let (halfClosed, reply) = try await NativeSuites.socksConnect(proxy, host: "93.184.216.34")
         expectEqual(reply[1], 0, "The drain control uses the protected socket")
         try await NewsTests.socketSend(halfClosed, Data("GET /drain HTTP/1.1\r\nHost: 93.184.216.34\r\n\r\n".utf8))
         await eventually("The drain fixture receives the request before its write-close") { ready.count == 1 }
@@ -520,7 +477,7 @@ extension NativeSuites.SocketSuite {
         }
         let mixed = NetworkBoundaryProxy(
             resolver: { _ in .allowed(ips: ["93.184.216.34", "127.0.0.1"]) }, connector: connector)
-        let (mixedClient, mixedReply) = try await socksConnect(mixed, host: "mixed.invalid")
+        let (mixedClient, mixedReply) = try await NativeSuites.socksConnect(mixed, host: "mixed.invalid")
         expectEqual(mixedReply[1], 2, "Mixed public/private DNS answers are rejected before connecting")
         mixedClient.cancel()
         await mixed.stop()
@@ -529,11 +486,11 @@ extension NativeSuites.SocketSuite {
             "127.0.0.1", "localhost", "2130706433", "0x7f000001", "localhost.", "test.local.", "intranet", "::1",
             "fe80::1%en0",
         ] {
-            let (client, reply) = try await socksConnect(production, host: host)
+            let (client, reply) = try await NativeSuites.socksConnect(production, host: host)
             expectEqual(reply[1], 2, "Private/alternate/scoped address denied at the socket boundary")
             client.cancel()
         }
-        let (udpClient, udpReply) = try await socksConnect(production, host: "93.184.216.34", command: 3)
+        let (udpClient, udpReply) = try await NativeSuites.socksConnect(production, host: "93.184.216.34", command: 3)
         expectEqual(udpReply[1], 2, "UDP ASSOCIATE is denied")
         try await NewsTests.socketSend(udpClient, Data("trailing".utf8))
         do {
@@ -543,7 +500,7 @@ extension NativeSuites.SocketSuite {
             expectEqual(error, .network("EOF"), "Rejected tunnel drains unread bytes and closes without a reset")
         }
         udpClient.cancel()
-        let (portClient, portReply) = try await socksConnect(production, host: "93.184.216.34", port: 22)
+        let (portClient, portReply) = try await NativeSuites.socksConnect(production, host: "93.184.216.34", port: 22)
         expectEqual(portReply[1], 2, "Unapproved ports denied")
         portClient.cancel()
         expectEqual(observed.count, 0, "Rejected requests never construct an upstream connection")
@@ -553,7 +510,7 @@ extension NativeSuites.SocketSuite {
                 ["rebind.invalid", "93.184.216.34", "assets.invalid"].contains(host)
                     ? .allowed(ips: ["93.184.216.34"]) : IPAddressValidator.validateHost(host)
             }, connector: connector)
-        let (client, reply) = try await socksConnect(allowed, host: "rebind.invalid")
+        let (client, reply) = try await NativeSuites.socksConnect(allowed, host: "rebind.invalid")
         expectEqual(reply[1], 0, "Approved destinations connect")
         try await NewsTests.socketSend(client, Data("relay proof".utf8))
         expectEqual(
