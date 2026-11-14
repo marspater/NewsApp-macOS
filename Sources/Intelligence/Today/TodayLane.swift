@@ -61,7 +61,8 @@ enum TodayLane: String, CaseIterable, Sendable, Hashable {
         }
     }
 
-    /// True for the four lanes that show only when enough stories qualify; The Lead and The Latest always have a place.
+    /// True for the four lanes that show only when at least `minimumCount` stories qualify; false for The Lead and The
+    /// Latest.
     var isConditional: Bool {
         self != .theLead && self != .theLatest
     }
@@ -109,7 +110,8 @@ struct TodayEditionThresholds: Equatable, Sendable {
     /// The placement confidence The Lead needs.
     var leadMinimumConfidence = 0.50
 
-    /// How old a report must be for the story to count as already underway for In Motion.
+    /// The In Motion window: a report older than it shows the story was underway, and a report inside it is the new
+    /// one.
     var inMotionWindowSeconds: TimeInterval = 24 * 3600
     /// The placement confidence In Motion needs.
     var inMotionMinimumConfidence = 0.70

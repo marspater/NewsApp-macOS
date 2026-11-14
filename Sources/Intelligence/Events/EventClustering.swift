@@ -62,7 +62,8 @@ struct EventClusteringReport: Equatable, Sendable {
     var joined = 0
     /// Events created.
     var created = 0
-    /// Articles split out of an event when a matcher upgrade repartitioned it.
+    /// Articles taken out of an event: split off when a matcher upgrade repartitioned it, or removed when they no
+    /// longer fit it.
     var detached = 0
     /// Decisions or repartitions dropped because membership changed underneath them; the next batch decides again.
     var conflicts = 0

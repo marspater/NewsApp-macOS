@@ -400,7 +400,8 @@ final class DOMElementNode: Sendable {
             )
         } ?? NSRegularExpression()
 
-    /// The elements that become reader blocks, in document order; `allowDivFallback` also reads text-bearing `div`s.
+    /// The elements that become reader blocks, in document order; `allowDivFallback` lets a container whose children
+    /// yield no text block fall back to its nested containers or to itself.
     /// Cached per argument unless the task is cancelled.
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
         let cached = cache.withLock {
