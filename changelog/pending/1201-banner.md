@@ -1,0 +1,1 @@
+- Give the first story banner a brief chance to show its publisher-page photo.

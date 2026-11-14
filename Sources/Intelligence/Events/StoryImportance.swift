@@ -25,6 +25,26 @@ enum StoryImportance: Int, Sendable, Comparable {
     static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 }
 
+/// Requests stories ahead of a running image lookup's remaining rows.
+actor StoryImagePriority {
+    private var pending: [String] = []
+    private var requested: Set<String> = []
+    func request(_ id: String) {
+        requested.insert(id)
+        if !pending.contains(id) { pending.append(id) }
+    }
+    func take() -> String? { pending.isEmpty ? nil : pending.removeFirst() }
+    func requeue(_ id: String) {
+        if requested.contains(id), !pending.contains(id) { pending.append(id) }
+    }
+    func withdraw(_ id: String) {
+        requested.remove(id)
+        pending.removeAll { $0 == id }
+    }
+    func isRequested(_ id: String) -> Bool { requested.contains(id) }
+    var hasPending: Bool { !pending.isEmpty }
+}
+
 /// Bounded publisher-image lookup. Nothing in the app rates importance; the opt-in live curation measurement in the
 /// test build does (#549).
 enum StoryCurator {
@@ -46,32 +66,72 @@ enum StoryCurator {
         imageBudget: Int = imageBudget,
         muting: MuteRules = MuteRules(),
         first: [String] = [],
+        priority: StoryImagePriority? = nil,
         activeLifetime: TimeInterval = EventCandidatePolicy.standard.activeEventLifetime,
         now: Date = Date(),
         onImageSaved: (@Sendable () -> Void)? = nil
     ) async throws -> Report {
         var report = Report()
         if imageFinder.isAvailable, imageBudget > 0 {
-            // ponytail: rows read once per pass; one lookup per event, the rest of an event waits for the next pass.
+            // Ordinary rows are read once; late priorities may need their own eligibility query.
             var lookedUp = Set<String>()
+            var activePriority: String?
             do {
-                let rows = try await database.imagelessStoryRows(
+                var rows = try await database.imagelessStoryRows(
                     activeSince: now.addingTimeInterval(-activeLifetime), limit: imageBudget * 3, muting: muting,
                     first: first, isRequestable: { StoryImageFinder.pageURL($0) != nil })
-                for (index, row) in rows.enumerated() {
+                while true {
                     guard lookedUp.count < imageBudget else {
-                        // A story whose event was looked up is covered by it.
                         report.deferredIDs = Set(
-                            rows[index...].filter { !lookedUp.contains($0.eventID ?? $0.id) }.map(\.id)
+                            rows.filter { !lookedUp.contains($0.eventID ?? $0.id) }.map(\.id)
                         ).intersection(Set(first))
                         break
                     }
+                    let requested = await priority?.take()
+                    if rows.isEmpty && requested == nil { break }
+                    activePriority = requested
+                    var promotedIndex: Int?
+                    var insertedPriority = false
+                    if let id = requested {
+                        if let index = rows.firstIndex(where: { $0.id == id }) {
+                            promotedIndex = index
+                            let row = rows.remove(at: index)
+                            rows.insert(row, at: 0)
+                        } else {
+                            let candidate = try await database.imagelessStoryRows(
+                                activeSince: now.addingTimeInterval(-activeLifetime), limit: 1, muting: muting,
+                                first: [id], isRequestable: { StoryImageFinder.pageURL($0) != nil })
+                            if let row = candidate.first, row.id == id {
+                                rows.insert(row, at: 0)
+                                insertedPriority = true
+                            } else {
+                                activePriority = nil
+                            }
+                        }
+                    }
+                    if let id = activePriority, await priority?.isRequested(id) == false {
+                        if insertedPriority {
+                            rows.removeFirst()
+                        } else if let index = promotedIndex {
+                            let row = rows.removeFirst()
+                            rows.insert(row, at: index)
+                        }
+                        activePriority = nil
+                        continue
+                    }
+                    guard !rows.isEmpty else { continue }
+                    let row = rows.removeFirst()
                     try Task.checkCancellation()
-                    if let event = row.eventID, lookedUp.contains(event) { continue }
+                    if lookedUp.contains(row.eventID ?? row.id) {
+                        activePriority = nil
+                        continue
+                    }
                     // A link the client would refuse before any request is never a candidate and spends no budget. Nothing
                     // is recorded, so a story whose link is later corrected under the same id is still looked up (#818).
                     lookedUp.insert(row.eventID ?? row.id)
-                    switch await imageFinder.find(row.link) {
+                    let result = await imageFinder.find(row.link)
+                    try Task.checkCancellation()
+                    switch result {
                     case .found(let url):
                         try Task.checkCancellation()
                         if try await database.recordStoryImage(row.id, imageURL: url, at: now, expectedLink: row.link) {
@@ -84,14 +144,19 @@ enum StoryCurator {
                         try await database.recordStoryImage(row.id, imageURL: nil, at: now, expectedLink: row.link)
                         report.imagesChecked += 1
                     case .unreachable:
-                        continue
+                        break
                     }
+                    activePriority = nil
                 }
             } catch is CancellationError {
+                if let activePriority { await priority?.requeue(activePriority) }
                 if report.imagesFound > 0 {
                     onImageSaved?()
                 }
                 throw CancellationError()
+            } catch {
+                if let activePriority { await priority?.requeue(activePriority) }
+                throw error
             }
         }
         return report

@@ -85,6 +85,18 @@ extension NewsTests {
             ),
             ("testNotifyBeforeClustering", { try await testNotifyBeforeClustering() }),
             ("testBannerTakesRecordedPhoto", { try await testBannerTakesRecordedPhoto() }),
+            ("testFirstBannerWaitsForPageImage", { try await testFirstBannerWaitsForPageImage() }),
+            ("testBannerPriorityAcrossLookupReplacement", { try await testBannerPriorityAcrossLookupReplacement() }),
+            ("testBannerImageWaitTimeoutAndCancellation", { await testBannerImageWaitTimeoutAndCancellation() }),
+            (
+                "testPriorityImageLookupSurvivesCancellation",
+                { try await testPriorityImageLookupSurvivesCancellation() }
+            ),
+            ("testImageLookupDatabaseFailureDoesNotSpin", { try await testImageLookupDatabaseFailureDoesNotSpin() }),
+            (
+                "testFirstIndividualBannerAfterGroupedWaitsForPhoto",
+                { await testFirstIndividualBannerAfterGroupedWaitsForPhoto() }
+            ),
             ("testArticleStoreErrorResilience", { await testArticleStoreErrorResilience() }),
             ("testSystemErrorHardeningAndResilience", { await testSystemErrorHardeningAndResilience() }),
             ("testAppContainerWiring", { await testAppContainerWiring() }),
@@ -2407,16 +2419,16 @@ extension NewsTests {
         let halted = NotificationService(post: { await haltedRecorder.record(Posted($0)) }, spacing: .zero)
         var haltedDelivery = NotificationDelivery(mode: .full, events: pairEvents)
         let asked = TestCounter()
-        // Allowed for the first banner's check (right before it shows), refused from then on.
+        // Allowed until the first banner posts, refused from then on.
         haltedDelivery.continues = {
             await asked.increment()
-            return await asked.value <= 1
+            return await haltedRecorder.posted.isEmpty
         }
         await halted.triageAndNotify(newArticles: [quiet, loud, fourth, fifth], delivery: haltedDelivery)
         assertEqual(
             (await haltedRecorder.posted).count, 1,
             "Once the settings no longer allow full banners, the pass stops after the banner already posting")
-        assertEqual(await asked.value, 2, "A halt ends the pass: no further gap is waited out and asked again")
+        assertEqual(await asked.value, 3, "A halt ends the pass: no further gap is waited out and asked again")
         let quietRecorder = Recorder()
         let quietService = NotificationService(post: { await quietRecorder.record(Posted($0)) }, spacing: .zero)
         await quietService.triageAndNotify(newArticles: [quiet], delivery: .init(mode: .full))
@@ -2861,6 +2873,386 @@ extension NewsTests {
         assertEqual(
             images[own.id]?.first?.absoluteString, own.imageUrl, "A story with a photo of its own keeps it")
         await db.close()
+    }
+
+    @MainActor
+    static func testFirstBannerWaitsForPageImage() async throws {
+        let suite = testDefaultsSuite("test.banner.first-photo")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: defaults)
+        let feed = "https://photo.invalid/feed"
+        settings.feedURLs = [feed]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = true
+        settings.notificationMode = .full
+        let story = FeedArticle(
+            storedID: "first-photo", title: "Explosion at a refinery in Houston, dozens killed; urgent evacuation",
+            link: "https://photo.invalid/first-photo", guid: "first-photo", description: "", pubDate: Date(),
+            source: "Publisher")
+        actor Gate {
+            var isOpen = false
+            var waiting: CheckedContinuation<Void, Never>?
+            var calls = 0
+            func open() {
+                isOpen = true
+                waiting?.resume()
+                waiting = nil
+            }
+            func find() async -> StoryImageLookup {
+                calls += 1
+                if !isOpen { await withCheckedContinuation { waiting = $0 } }
+                return .found("https://cdn.invalid/first-photo.jpg")
+            }
+        }
+        actor Recorder {
+            var banners: [StoryBanner] = []
+            func post(_ banner: StoryBanner) { banners.append(banner) }
+        }
+        let gate = Gate()
+        let recorder = Recorder()
+        let service = NotificationService(post: { await recorder.post($0) }, spacing: .zero)
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
+        await store.initialize()
+        let manager = FeedManager(
+            settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, [story], nil, nil) } },
+            notifyBatch: { articles, delivery in
+                var delivery = delivery
+                let curated = delivery.curated
+                delivery.curated = { story in
+                    let result = await curated(story)
+                    await gate.open()
+                    return result
+                }
+                await service.triageAndNotify(newArticles: articles, delivery: delivery)
+            },
+            dependencies: FeedManager.Dependencies(
+                imageFinder: StoryImageFinder { _ in await gate.find() }, allowsBackgroundWork: { true }))
+        await manager.fetchFeedsAsync()
+        await manager.notificationPass?.value
+        let banners = await recorder.banners
+        assertEqual(
+            banners.first?.imageURLs.first?.absoluteString, "https://cdn.invalid/first-photo.jpg",
+            "The first banner includes the photo saved while its page lookup is running")
+        assertEqual(await gate.calls, 1, "The page is requested only once")
+        manager.stopBackgroundWork()
+        await store.database.close()
+    }
+
+    @MainActor
+    static func testBannerPriorityAcrossLookupReplacement() async throws {
+        let suite = testDefaultsSuite("test.banner.priority-replacement")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: defaults)
+        let feed = "https://photo.invalid/feed"
+        settings.feedURLs = [feed]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = true
+        settings.notificationMode = .full
+        let first = FeedArticle(
+            storedID: "old", title: "Garden", link: "https://photo.invalid/old",
+            guid: "old", description: "", pubDate: Date(), source: "Publisher")
+        let selected = FeedArticle(
+            storedID: "selected", title: "Explosion at a refinery in Houston, dozens killed; urgent evacuation",
+            link: "https://photo.invalid/selected", guid: "selected", description: "", pubDate: Date(),
+            source: "Publisher")
+        actor Gate {
+            var calls: [String] = []
+            var oldActive = false
+            var overlapped = false
+            var started: CheckedContinuation<Void, Never>?
+            var release: CheckedContinuation<Void, Never>?
+            func wait() async { if calls.isEmpty { await withCheckedContinuation { started = $0 } } }
+            func open() {
+                release?.resume()
+                release = nil
+            }
+            func find(_ link: String) async -> StoryImageLookup {
+                calls.append(link)
+                if link.hasSuffix("/old") {
+                    oldActive = true
+                    started?.resume()
+                    started = nil
+                    await withCheckedContinuation { release = $0 }
+                    oldActive = false
+                    return .unreachable
+                }
+                if oldActive { overlapped = true }
+                return .found("https://cdn.invalid/selected.jpg")
+            }
+        }
+        actor Recorder {
+            var banners: [StoryBanner] = []
+            func post(_ banner: StoryBanner) { banners.append(banner) }
+        }
+        let gate = Gate()
+        let recorder = Recorder()
+        let service = NotificationService(post: { await recorder.post($0) }, spacing: .zero)
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
+        await store.initialize()
+        _ = try await store.database.upsertArticles([first])
+        let manager = FeedManager(
+            settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, [selected], nil, nil) } },
+            notifyBatch: { articles, delivery in
+                var delivery = delivery
+                let prioritize = delivery.prioritizeImage
+                delivery.prioritizeImage = { id in
+                    let accepted = await prioritize(id)
+                    await gate.open()
+                    return accepted
+                }
+                await service.triageAndNotify(newArticles: articles, delivery: delivery)
+            },
+            dependencies: FeedManager.Dependencies(
+                imageFinder: StoryImageFinder { link in await gate.find(link) }, allowsBackgroundWork: { true }))
+        manager.requestStoryImages(for: [first.id])
+        await gate.wait()
+        await manager.fetchFeedsAsync()
+        await manager.notificationPass?.value
+        assertEqual(
+            await recorder.banners.first?.imageURLs.first?.absoluteString, "https://cdn.invalid/selected.jpg",
+            "The banner's story is prioritized after the old worker stops")
+        assertFalse(await gate.overlapped, "The replacement does not overlap the cancelled finder")
+        let calls = await gate.calls
+        assertEqual(
+            calls.prefix(2).map { $0 }, [first.link, selected.link],
+            "The successor waits and requests the banner story first")
+        manager.stopBackgroundWork()
+        await store.database.close()
+    }
+
+    static func testFirstIndividualBannerAfterGroupedWaitsForPhoto() async {
+        let starredFeed = "https://starred.invalid/feed"
+        let pending = (1...2).map { index in
+            FeedArticle(
+                storedID: "starred-\(index)", title: "Garden notes \(index)",
+                link: "https://starred.invalid/\(index)", guid: "starred-\(index)", description: "", pubDate: Date(),
+                source: "Starred")
+        }
+        let story = FeedArticle(
+            storedID: "after-group", title: "Explosion at a refinery in Houston, dozens killed; urgent evacuation",
+            link: "https://photo.invalid/after-group", guid: "after-group", description: "", pubDate: Date(),
+            source: "Publisher")
+        actor State {
+            var banners: [StoryBanner] = []
+            var requested: [String] = []
+            func post(_ banner: StoryBanner) { banners.append(banner) }
+            func request(_ id: String) { requested.append(id) }
+        }
+        let state = State()
+        let service = NotificationService(post: { await state.post($0) }, spacing: .zero)
+        var delivery = NotificationDelivery(mode: .full)
+        delivery.starredFeedURLs = [starredFeed]
+        delivery.starredPending = [starredFeed: pending]
+        delivery.prioritizeImage = { id in
+            await state.request(id)
+            return false
+        }
+        await service.triageAndNotify(newArticles: [story], delivery: delivery)
+        assertEqual(await state.banners.count, 2, "The grouped starred banner and the story's banner both post")
+        assertEqual(
+            await state.requested, [story.id],
+            "The first individual banner asks for its photo although a grouped banner posts before it")
+    }
+
+    static func testBannerImageWaitTimeoutAndCancellation() async {
+        let story = FeedArticle(
+            storedID: "wait-timeout", title: "Explosion at a refinery in Houston, dozens killed; urgent evacuation",
+            link: "https://photo.invalid/wait-timeout", guid: "wait-timeout", description: "", pubDate: Date(),
+            source: "Publisher")
+        actor State {
+            var banners: [StoryBanner] = []
+            var waiting: CheckedContinuation<Void, Never>?
+            var started = false
+            var checks = 0
+            func modeContinues() -> Bool {
+                checks += 1
+                return checks != 2
+            }
+            func post(_ banner: StoryBanner) { banners.append(banner) }
+            func signal() {
+                started = true
+                waiting?.resume()
+                waiting = nil
+            }
+            func wait() async { if !started { await withCheckedContinuation { waiting = $0 } } }
+        }
+        actor Requests {
+            var count = 0
+            func record() { count += 1 }
+        }
+        let requests = Requests()
+        var pictured = story
+        pictured.imageUrl = "https://cdn.invalid/existing.jpg"
+        var picturedDelivery = NotificationDelivery(mode: .full)
+        picturedDelivery.prioritizeImage = { _ in
+            await requests.record()
+            return true
+        }
+        let immediate = State()
+        let picturedService = NotificationService(post: { await immediate.post($0) }, spacing: .zero)
+        await picturedService.triageAndNotify(newArticles: [pictured], delivery: picturedDelivery)
+        assertEqual(await requests.count, 0, "A story with a usable photo never waits for a lookup")
+        assertEqual(
+            await immediate.banners.first?.imageURLs.first?.absoluteString, pictured.imageUrl,
+            "A story's own photo is posted immediately")
+
+        let timeout = State()
+        let service = NotificationService(post: { await timeout.post($0) }, spacing: .zero)
+        var delivery = NotificationDelivery(mode: .full)
+        delivery.prioritizeImage = { _ in true }
+        let start = ContinuousClock.now
+        await service.triageAndNotify(newArticles: [story], delivery: delivery)
+        let elapsed = start.duration(to: .now)
+        assertTrue(elapsed >= .seconds(2), "A missing image has a short opportunity to arrive")
+        assertTrue(elapsed < .seconds(5), "A missing image does not hold the banner indefinitely")
+        assertEqual(await timeout.banners.count, 1, "The banner posts when the image wait expires")
+
+        let disabledRequests = Requests()
+        let disabled = State()
+        let disabledService = NotificationService(post: { await disabled.post($0) }, spacing: .zero)
+        var disabledDelivery = NotificationDelivery(mode: .full)
+        disabledDelivery.continues = { false }
+        disabledDelivery.prioritizeImage = { _ in
+            await disabledRequests.record()
+            return true
+        }
+        await disabledService.triageAndNotify(newArticles: [story], delivery: disabledDelivery)
+        assertEqual(await disabledRequests.count, 0, "A disabled pass starts no targeted lookup")
+        assertTrue(await disabled.banners.isEmpty, "A disabled pass posts no banner")
+
+        let switched = State()
+        let switchedService = NotificationService(post: { await switched.post($0) }, spacing: .zero)
+        var switchedDelivery = NotificationDelivery(mode: .full)
+        switchedDelivery.prioritizeImage = { _ in true }
+        switchedDelivery.continues = { await switched.modeContinues() }
+        await switchedService.triageAndNotify(newArticles: [story], delivery: switchedDelivery)
+        assertEqual(await switched.checks, 2, "A mode change ends the pass without checking again")
+        assertTrue(await switched.banners.isEmpty, "A pass halted during the image wait never posts")
+
+        let cancelled = State()
+        let cancellable = NotificationService(post: { await cancelled.post($0) }, spacing: .zero)
+        var cancelDelivery = NotificationDelivery(mode: .full)
+        cancelDelivery.prioritizeImage = { _ in
+            await cancelled.signal()
+            return true
+        }
+        let preparedDelivery = cancelDelivery
+        let task = Task { await cancellable.triageAndNotify(newArticles: [story], delivery: preparedDelivery) }
+        await cancelled.wait()
+        task.cancel()
+        await task.value
+        assertTrue(await cancelled.banners.isEmpty, "Cancelling an image wait drops the banner")
+    }
+
+    static func testPriorityImageLookupSurvivesCancellation() async throws {
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let story = FeedArticle(
+            storedID: "priority", title: "Story", link: "https://photo.invalid/priority", guid: "priority",
+            description: "", pubDate: Date(), source: "Publisher")
+        _ = try await db.upsertArticles([story])
+        actor Gate {
+            var started = false
+            var startedWaiter: CheckedContinuation<Void, Never>?
+            var release: CheckedContinuation<Void, Never>?
+            func wait() async { if !started { await withCheckedContinuation { startedWaiter = $0 } } }
+            func open() {
+                release?.resume()
+                release = nil
+            }
+            func find() async -> StoryImageLookup {
+                started = true
+                startedWaiter?.resume()
+                startedWaiter = nil
+                await withCheckedContinuation { release = $0 }
+                return .unreachable
+            }
+        }
+        let gate = Gate()
+        let priority = StoryImagePriority()
+        await priority.request(story.id)
+        let task = Task {
+            try await StoryCurator.run(
+                in: db, imageFinder: StoryImageFinder { _ in await gate.find() }, priority: priority)
+        }
+        await gate.wait()
+        task.cancel()
+        await gate.open()
+        _ = try? await task.value
+        assertTrue(await priority.hasPending, "A cancelled priority remains for the successor")
+        _ = try await StoryCurator.run(
+            in: db, imageFinder: StoryImageFinder { _ in .found("https://cdn.invalid/priority.jpg") },
+            priority: priority)
+        assertEqual(
+            try await db.storyImages(for: [story.id])[story.id], "https://cdn.invalid/priority.jpg",
+            "The successor retries the cancelled priority")
+        await priority.request("not-in-library")
+        _ = try await StoryCurator.run(in: db, imageFinder: StoryImageFinder { _ in .none }, priority: priority)
+        assertFalse(await priority.hasPending, "An ineligible priority does not schedule endless empty passes")
+        let abandoned = FeedArticle(
+            storedID: "abandoned", title: "Another story", link: "https://photo.invalid/abandoned", guid: "abandoned",
+            description: "", pubDate: Date(), source: "Another publisher")
+        _ = try await db.upsertArticles([abandoned])
+        let secondGate = Gate()
+        await priority.request(abandoned.id)
+        let abandonedTask = Task {
+            try await StoryCurator.run(
+                in: db, imageFinder: StoryImageFinder { _ in await secondGate.find() }, priority: priority)
+        }
+        await secondGate.wait()
+        await priority.withdraw(abandoned.id)
+        abandonedTask.cancel()
+        await secondGate.open()
+        _ = try? await abandonedTask.value
+        assertFalse(await priority.hasPending, "A withdrawn in-flight priority is not requeued on cancellation")
+        await db.close()
+    }
+
+    @MainActor
+    static func testImageLookupDatabaseFailureDoesNotSpin() async throws {
+        let suite = testDefaultsSuite("test.banner.image-database-failure")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: defaults)
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "image-failure-\(UUID().uuidString).sqlite3"
+        ).path
+        defer { removeTemporaryLibrary(atPath: path) }
+        let store = ArticleStore(database: DatabaseEngine(path: path), spotlightIndexer: MockSpotlightIndexer())
+        await store.initialize()
+        let story = FeedArticle(
+            storedID: "retry", title: "Story", link: "https://photo.invalid/retry", guid: "retry",
+            description: "", pubDate: Date(), source: "Publisher")
+        _ = try await store.database.upsertArticles([story])
+        await store.database.close()
+        let manager = FeedManager(
+            settings: settings, store: store, schedulesRefresh: false,
+            dependencies: FeedManager.Dependencies(
+                imageFinder: StoryImageFinder { _ in .found("https://cdn.invalid/retry.jpg") },
+                allowsBackgroundWork: { true }))
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await manager.prioritizeBannerImage(story.id)
+        }
+        assertFalse(await cancelled.value, "A cancelled request does not start a lookup")
+        assertFalse(await manager.imagePriority.hasPending, "A cancelled request leaves no priority behind")
+        assertTrue(manager.imageLookupTask == nil, "A cancelled request starts no worker")
+        assertTrue(await manager.prioritizeBannerImage(story.id), "The first request starts a lookup")
+        await manager.imageLookupTask?.value
+        assertTrue(manager.imageLookupTask == nil, "A database failure leaves no successor running")
+        assertTrue(await manager.imagePriority.hasPending, "The failed priority remains queued")
+        try await store.database.open()
+        assertTrue(await manager.prioritizeBannerImage(story.id), "A later request starts a new pass")
+        await manager.imageLookupTask?.value
+        assertEqual(
+            try await store.database.storyImages(for: [story.id])[story.id], "https://cdn.invalid/retry.jpg",
+            "The later pass handles the retained request")
+        manager.stopBackgroundWork()
+        await store.database.close()
     }
 
     /// #790: a banner for a report outside any event records the report itself. When another outlet's report later

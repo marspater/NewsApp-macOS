@@ -228,7 +228,10 @@ Reads:
 
 The banners of one pass post **5 minutes apart** (#587), in posting order, so a refresh reads as a trickle of stories
 rather than one burst; a pass of five normal banners takes 20 minutes and the next pass waits for it. No refresh,
-spinner or Shortcut waits for a pass. Before each banner after the first, the pass reads the live settings: once the
+spinner or Shortcut waits for a pass. If the first individual banner has no usable image, it asks the existing
+publisher-page lookup to prioritize its story and polls for a recorded photo over a two-second window. Database and
+settings reads are separate from that window. A slow or unavailable lookup leaves the banner without a photo; the
+refresh does not wait. Before each banner after the first, the pass reads the live settings: once the
 mode is no longer Full, or notifications are off, the rest of the pass is dropped. A banner is recorded **immediately
 after it posts**: a priority or normal banner at the time it posts, so its window measures from the banner the reader
 saw; a starred banner at the pass start, the cutoff its pending stories were read at, so a starred story that arrives
