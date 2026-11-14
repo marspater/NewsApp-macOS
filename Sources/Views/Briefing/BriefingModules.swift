@@ -21,6 +21,7 @@ import SwiftUI
 enum BriefingPillar: String, CaseIterable, Codable, Sendable {
     case situationalAwareness, intelligenceAssessment, strategicImpact, weakSignals, forwardWatch
 
+    /// The pillar's name, shown as its eyebrow.
     var title: String {
         switch self {
         case .situationalAwareness: return "Situational awareness"
@@ -31,6 +32,7 @@ enum BriefingPillar: String, CaseIterable, Codable, Sendable {
         }
     }
 
+    /// The question the pillar answers, shown in its header.
     var question: String {
         switch self {
         case .situationalAwareness: return "What is happening right now?"
@@ -64,6 +66,7 @@ enum BriefingModuleKind: String, CaseIterable, Codable, Sendable {
     case weakSignals
     case forwardWatch, escalationTimeline
 
+    /// The pillar the module sits in.
     var pillar: BriefingPillar {
         switch self {
         case .heroCarousel, .worldTension, .sinceLastBriefing, .executiveSitrep: return .situationalAwareness
@@ -74,6 +77,7 @@ enum BriefingModuleKind: String, CaseIterable, Codable, Sendable {
         }
     }
 
+    /// The module's name in the board and the Customize sheet.
     var title: String {
         switch self {
         case .heroCarousel: return "Hero carousel"
@@ -109,6 +113,7 @@ enum BriefingModuleKind: String, CaseIterable, Codable, Sendable {
 struct BriefingLayout: Equatable, Codable, Sendable {
     private var visible: [BriefingPillar: [BriefingModuleKind]]
 
+    /// The canvas layout: every module in canvas order, all but What drives World Tension shown.
     static let standard = BriefingLayout(
         visible: Dictionary(
             uniqueKeysWithValues: BriefingPillar.allCases.map { ($0, $0.kinds.filter(\.defaultVisible)) }))
@@ -139,6 +144,7 @@ struct BriefingLayout: Equatable, Codable, Sendable {
     /// The pillar's visible modules, in order.
     func modules(in pillar: BriefingPillar) -> [BriefingModuleKind] { visible[pillar] ?? [] }
 
+    /// Whether the module is shown.
     func isVisible(_ kind: BriefingModuleKind) -> Bool { modules(in: kind.pillar).contains(kind) }
 
     /// Every module of the pillar, visible ones in their order and hidden ones at their place (Customize sheet).
@@ -150,6 +156,7 @@ struct BriefingLayout: Equatable, Codable, Sendable {
         return ordered
     }
 
+    /// Shows a module at its canvas place among the visible ones, or hides it; the pinned modules stay at their ends.
     mutating func setVisible(_ kind: BriefingModuleKind, _ isVisible: Bool) {
         var kinds = modules(in: kind.pillar)
         if isVisible, !kinds.contains(kind) {
@@ -196,6 +203,7 @@ extension AppSettings {
         briefingModuleOrder.map { BriefingLayout(stored: $0) } ?? .standard
     }
 
+    /// Saves the layout; the standard layout is saved as nil, so a later default change reaches this Mac.
     func setBriefingLayout(_ layout: BriefingLayout) {
         setBriefingModuleOrder(layout == .standard ? nil : layout.stored)
     }
@@ -207,11 +215,15 @@ extension AppSettings {
 struct BriefingLoadContext: Sendable {
     /// The edition, in edition order.
     let entries: [FeedEntry]
+    /// The feed entry ids of the stories the carousel shows.
     let heroIDs: Set<String>
+    /// The finite edition, when the list has one.
     let briefing: FiniteBriefing?
+    /// The time the loaders treat as now.
     let now: Date
     /// A snapshot of the window's World Tension model.
     let tension: WorldTensionState
+    /// Ids of the reports already read.
     let readIDs: Set<String>
     /// When the edition before this one was selected; nil while the app does not track it.
     let previousEditionStartedAt: Date?
@@ -225,18 +237,28 @@ struct BriefingBoardData: Equatable, Sendable {
     var details = BriefingStoryDetails()
     /// The ranking the board's stories were ordered by.
     var ranking = BriefingRanking()
+    /// The Executive sitrep; nil hides it.
     var sitrep: BriefingSitrepData?
+    /// Since your last briefing; nil hides it.
     var sinceLast: BriefingSinceLastData?
+    /// Priority developments; nil hides it.
     var priority: BriefingPriorityData?
+    /// Source footprint; nil hides it.
     var footprint: BriefingFootprintData?
     /// The regions list and the region tiles share one data struct.
     var regions: BriefingRegionsData?
+    /// Industry impact; nil hides it.
     var industry: BriefingIndustryData?
+    /// What drives World Tension; nil hides it.
     var drivers: BriefingDriversData?
+    /// Escalation timeline; nil hides it.
     var timeline: BriefingTimelineData?
+    /// Weak signals; nil hides it.
     var weakSignals: BriefingWeakSignalsData?
+    /// Forward watch; nil hides it.
     var forwardWatch: BriefingForwardWatchData?
 
+    /// Runs each module's loader in turn, stopping with what it has once the task is cancelled.
     @MainActor
     static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self {
         var data = Self()
@@ -300,6 +322,7 @@ struct BriefingBoardData: Equatable, Sendable {
 
 /// The board's region filter. Every module view receives it.
 struct BriefingBoardFilter: Equatable, Sendable {
+    /// The macro region the board is narrowed to; nil shows every story.
     var region: TensionMacroRegion? = nil
     /// The regions the Regions loader resolved from each entry's reports, by entry ID; the board fills it from its data.
     var regionsByEntry: [String: Set<TensionMacroRegion>] = [:]
@@ -319,9 +342,13 @@ struct BriefingBoardFilter: Equatable, Sendable {
 /// The one module card (DESIGN.md 8.4): title row with an optional caption and options menu, surface fill, card
 /// radius, hairline border and resting shadow. Modules never draw their own card background.
 struct BriefingModuleCard<Content: View, Options: View>: View {
+    /// The module's name in the title row; also names its options menu.
     let title: String
+    /// Secondary text at the trailing end of the title row.
     var caption: String?
+    /// The items of the title row's options menu; nil shows no menu.
     var options: (() -> Options)?
+    /// The module's body, under the title row.
     let content: () -> Content
 
     @Environment(\.effectiveContrast) private var contrast
@@ -382,6 +409,7 @@ struct BriefingModuleCard<Content: View, Options: View>: View {
 }
 
 extension BriefingModuleCard where Options == EmptyView {
+    /// Creates a card without an options menu.
     init(title: String, caption: String? = nil, @ViewBuilder content: @escaping () -> Content) {
         self.init(title: title, caption: caption, options: nil, content: content)
     }

@@ -17,10 +17,15 @@ import SwiftUI
 
 /// Escalation timeline: turning points across the lead story's thread (#850).
 struct BriefingTimelineData: Equatable, Sendable {
+    /// One turning point of the timeline.
     struct Item: Equatable, Sendable, Identifiable {
+        /// The merged timeline item's id, prefixed with its event id.
         let id: String
+        /// The item's stated date as written, shown above its summary.
         let dayText: String
+        /// What happened, from the stored overview timeline.
         let summary: String
+        /// The occurrence date from `orderingDate(of:)`, for order only.
         let date: Date
         /// The span the stated date covers: one day, or one month for a month-only date.
         let span: DateInterval
@@ -30,18 +35,22 @@ struct BriefingTimelineData: Equatable, Sendable {
 
     /// One story with at least two dated past turning points.
     struct Thread: Equatable, Sendable {
+        /// The story the timeline belongs to.
         let entry: FeedEntry
+        /// Two to five past turning points, oldest first.
         let items: [Item]
         /// Whole days from the first item to the edition; nil when the first item is not a day-precision date, so a
         /// month-only date is never counted from its first day (#1241).
         let day: Int?
 
+        /// The story's headline, with "· day N" when `day` is known.
         var caption: String { day.map { "\(entry.representative.title) · day \($0)" } ?? entry.representative.title }
     }
 
     /// Most publishers first.
     let threads: [Thread]
 
+    /// Whether a thread with a story inside the filter exists.
     func hasRows(under filter: BriefingBoardFilter) -> Bool { thread(for: filter) != nil }
 
     /// The lead thread inside the filter.
@@ -112,6 +121,8 @@ struct BriefingTimelineData: Equatable, Sendable {
         return distinct ? latest : nil
     }
 
+    /// The story's thread from its merged timeline: nil without two distinct past dates, and no day count when the
+    /// first item is not a single day.
     static func thread(entry: FeedEntry, timeline: [OverviewTimelineItem], now: Date) -> Thread? {
         guard let items = items(timeline, now: now), let first = items.first else { return nil }
         guard first.span.duration <= 86_400 else { return Thread(entry: entry, items: items, day: nil) }
@@ -207,8 +218,12 @@ private enum Metrics {
     static let escalatingDot: CGFloat = 12
 }
 
+/// The Escalation timeline module: the turning points of the lead thread inside the board's filter, one column each,
+/// with a larger warning dot where the summary reports escalation; draws nothing without such a thread. The turning
+/// points are the timelines of Clio · sourced overviews, the escalation cue Eris · World Tension's.
 struct BriefingTimelineModuleView: View {
     let data: BriefingTimelineData
+    /// The board's filter; the first thread with a story inside it shows.
     let filter: BriefingBoardFilter
     let actions: BriefingActions
 

@@ -191,6 +191,8 @@ extension BriefingHeroCarouselView {
         .accessibilityLabel(label)
     }
 
+    /// The Lead's VoiceOver label: headline, publisher and date, then the position in the carousel, Developing, reading
+    /// time, publisher count and original reports, ending with Read or Unread.
     func leadAccessibilityLabel(_ entry: FeedEntry, lead: LeadPresentation, isRead: Bool) -> String {
         let story = entry.representative
         let metadata = lead.metadata[entry.id] ?? StoryCardMetadata()

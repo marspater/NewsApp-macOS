@@ -17,9 +17,11 @@ import SwiftUI
 
 /// Priority developments: impact, momentum, original reports and the reported fact of the top-ranked threads (#849).
 struct BriefingPriorityData: Equatable, Sendable {
+    /// Whether a thread is gaining reports, from `momentum(dates:now:)`.
     enum Momentum: Equatable, Sendable {
         case rising, steady, fading
 
+        /// The arrow and word the card's Momentum stat shows.
         var label: String {
             switch self {
             case .rising: return "▲ Rising"
@@ -33,27 +35,39 @@ struct BriefingPriorityData: Equatable, Sendable {
     struct Quote: Equatable, Sendable {
         let text: String
         let publisher: String
+        /// The citation's or the cited report's http(s) link; nil keeps the publisher as plain text.
         let url: URL?
     }
 
+    /// One top-ranked thread's card.
     struct Card: Equatable, Sendable, Identifiable {
+        /// The event id.
         let id: String
+        /// The thread's event, which the card and its footer button open; nil in capture samples.
         let summary: EventFeedSummary?
+        /// "11 publishers · 14 min ago".
         let meta: String
+        /// "Developing" or "Updated", shown as a tag; nil shows none.
         let state: String?
         let headline: String
+        /// The impact label from `impactText(_:)`.
         let impact: String
         let momentum: Momentum
         /// "5 of 11", or nil when the member reports were not available to check for wire copy.
         let original: String?
+        /// The first overview fact with a cited publisher, or else a member report's description; nil hides the layer.
         let reported: Quote?
         /// Two differing accounts, "[participant]: position", or empty.
         let accounts: [String]
+        /// A cited line that itself says something is unconfirmed; nil hides the layer.
         let notYetReported: Quote?
+        /// Days since the thread's first report, counting the first day as 1; nil without member reports.
         let threadDay: Int?
+        /// The first-ranked thread, drawn with the accent border.
         let isLead: Bool
     }
 
+    /// At most three cards, in ranking order.
     let cards: [Card]
 
     /// Reports in the last six hours against the six hours before, with fallback velocity over earlier windows and
@@ -330,9 +344,14 @@ struct BriefingPriorityData: Equatable, Sendable {
     }
 }
 
+/// The Priority developments module: a card per top-ranked thread with its impact, momentum and original reports, a
+/// reported quote, differing accounts and a cited unconfirmed line. Clicking a card or its footer button opens the
+/// event overview; a quote's publisher opens its page. Quotes and accounts come from Clio · sourced overviews, a stored
+/// impact rating from Athena · editorial selection.
 struct BriefingPriorityModuleView: View {
     let data: BriefingPriorityData
     let filter: BriefingBoardFilter
+    /// Opens a card's event overview or a quote's publisher page.
     let actions: BriefingActions
 
     @Environment(\.effectiveContrast) private var contrast
@@ -402,6 +421,8 @@ struct BriefingPriorityModuleView: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// The card border's width: the lead stroke for the lead card, otherwise a hairline, thicker with Increase
+    /// Contrast.
     static func strokeLineWidth(isLead: Bool, contrast: ColorSchemeContrast) -> CGFloat {
         if isLead {
             return AppLayout.leadTileStroke
