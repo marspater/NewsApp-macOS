@@ -1374,7 +1374,9 @@ extension NewsTests {
         let extractedImage = pipeline.extractLeadImage(from: htmlWithOG)
         assertEqual(extractedImage, "https://example.com/lead-image.jpg", "Should extract og:image meta tag")
 
-        // 4. #1151: Deeply nested div extraction performance (< 250ms)
+        // 4. #1151: deeply nested divs. Before memoization the work grew with the fourth power of depth: 74.5 s at
+        // depth 128. Memoized, it takes milliseconds, but a shared CI runner with six test jobs took 349 ms, so the
+        // bound sits far above load noise and far below the regression.
         var nestedHTML = "<html><body>"
         for i in 0..<128 {
             nestedHTML += "<div class=\"wrapper-\(i)\">"
@@ -1388,13 +1390,13 @@ extension NewsTests {
         }
         nestedHTML += "</body></html>"
 
-        let start = Date()
+        let clock = ContinuousClock()
+        let start = clock.now
         let outcome = pipeline.extractFromHTML(nestedHTML)
-        let elapsed = Date().timeIntervalSince(start)
-        let elapsedMs = Int(elapsed * 1000)
+        let elapsed = start.duration(to: clock.now)
         assertTrue(
-            elapsed < 0.25,
-            "128-depth nested div extraction must complete in under 250ms (took \(elapsedMs)ms) (#1151)")
+            elapsed < .seconds(2),
+            "128-depth nested div extraction must complete in under 2 s (took \(elapsed)) (#1151)")
         if case .success(let text, _, _) = outcome {
             assertTrue(text.contains("substantive paragraph"), "Nested prose is extracted correctly (#1151)")
         } else {

@@ -279,7 +279,9 @@ final class NewsSmokeUITests: XCTestCase {
         opener.click()
         XCTAssertTrue(sheet.waitForExistence(timeout: 10), "Publisher Health did not reopen")
         XCTAssertTrue(row.waitForExistence(timeout: 20), "The table lists no feed after reopening")
-        row.click()
+        // On the CI runner XCTest found the row's centre outside the sheet's visible area, scrolled sideways and still
+        // refused the row as not hittable. Click near its leading edge, where a reader would.
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).click()
         XCTAssertTrue(row.isSelected, "A click did not select the feed's row")
         sheet.typeKey(.return, modifierFlags: [])
         XCTAssertEqual(
