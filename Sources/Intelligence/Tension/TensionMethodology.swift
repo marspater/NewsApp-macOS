@@ -820,7 +820,8 @@ struct TensionBriefFacts: Hashable, Sendable {
     let level: TensionLevel
     /// Whole degrees since the previous scored day; nil when it is the first.
     let change: Int?
-    /// Mean 7-day reading over the scored days shown; nil with fewer than three.
+    /// Mean of the smoothed readings over the scored days of the history (`TensionHistory.load` covers 30 days by
+    /// default); nil with fewer than three.
     let typicalDegrees: Int?
     /// Whether late items can still change the reading.
     let isProvisional: Bool
