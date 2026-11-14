@@ -1,0 +1,1 @@
+- Ports the socket atom (SocketTests: 4 loopback tests, 60 assertions) to the native Swift Testing target under the `.socket` tag.
