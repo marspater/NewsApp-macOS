@@ -594,7 +594,7 @@ enum TodayShadowEvaluation {
         if env["NEWS_LEAD_ARMS"] == "1" {
             try await EditorialRankingEvaluation.writeLeadArms(
                 of: assignedList, currentLead: shownLead, imageless: imageless, profile: context.profile,
-                pool: pool.name, now: now, database: db, currentSelectionMs: assignDurationMs,
+                pool: pool.name, now: now, database: db,
                 privateOutput: outputDirectory)
         }
 

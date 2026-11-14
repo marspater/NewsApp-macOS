@@ -151,6 +151,8 @@ extension EditorialRankingEvaluation {
         let overlapBase: Int
         /// For `base` only: Spearman, over the eligible pool, with the shipped Lead precedence (affinity included).
         let rankCorrelationCurrent: Double?
+        /// Median of five rankings for `base` and `base+mmr`. Nil for `current`: the run times only the whole plan's
+        /// assignment (`assignDurationMs` in the shadow report), not the Lead's photo-aware selection.
         let selectionMs: Double?
     }
 
@@ -220,7 +222,7 @@ extension EditorialRankingEvaluation {
     /// can be applied from here: the photo rule (a story without a photo is out while any story has one; when none
     /// has, one story is shown) and the slide cap as the display depth.
     static func leadArms(
-        stories: [LeadArmStory], currentShown: [String], settings: LeadArmSettings, currentSelectionMs: Double?,
+        stories: [LeadArmStory], currentShown: [String], settings: LeadArmSettings,
         listDepth: Int = TodayShadowEvaluation.leadRankingDepth
     ) throws -> LeadArms {
         guard (1...listDepth).contains(settings.displayDepth) else { throw EditorialRankingError.invalidConfiguration }
@@ -271,7 +273,7 @@ extension EditorialRankingEvaluation {
                 selectionMs: ms)
         }
         let arms = [
-            "current": try measures("current", correlation: nil, ms: currentSelectionMs),
+            "current": try measures("current", correlation: nil, ms: nil),
             "base": try measures(
                 "base", correlation: rankCorrelation(shipped, base.map(\.id)), ms: baseMs.sorted()[2]),
             "base+mmr": try measures("base+mmr", correlation: nil, ms: mmrMs.sorted()[2]),
@@ -329,7 +331,7 @@ extension EditorialRankingEvaluation {
             // that misses its bar leaves four.
             let shown = ["s02", "s03", "s05", "s04"]
             let arms = try leadArms(
-                stories: stories, currentShown: shown, settings: LeadArmSettings(), currentSelectionMs: nil)
+                stories: stories, currentShown: shown, settings: LeadArmSettings())
             let report = arms.report
             let baseOrder = arms.orders["base"] ?? []
             check(Set(arms.orders.keys) == Set(leadArmNames) && arms.orders["current"] == shown, "three named arms")
@@ -389,8 +391,7 @@ extension EditorialRankingEvaluation {
                     hasPhoto: $0.hasPhoto, vector: $0.vector, event: $0.event, publisher: $0.publisher)
             }
             let control = try leadArms(
-                stories: neutral, currentShown: Array(baseOrder.prefix(5)), settings: LeadArmSettings(),
-                currentSelectionMs: 1)
+                stories: neutral, currentShown: Array(baseOrder.prefix(5)), settings: LeadArmSettings())
             check(
                 control.report.currentAndBaseCoincide && control.report.arms["base"]?.rankCorrelationCurrent == 1
                     && control.report.arms["base"]?.overlapCurrent == 5 && control.orders["base+mmr"] == mmrOrder,
@@ -400,13 +401,13 @@ extension EditorialRankingEvaluation {
                     LeadArmStory(
                         id: $0.id, score: $0.score, originalReports: $0.originalReports, affinity: 0, date: $0.date,
                         hasPhoto: false, vector: $0.vector, event: $0.event, publisher: $0.publisher)
-                }, currentShown: ["s01"], settings: LeadArmSettings(), currentSelectionMs: nil)
+                }, currentShown: ["s01"], settings: LeadArmSettings())
             check(
                 dark.report.displayDepth == 1 && dark.report.eligible == 30 && dark.report.currentAndBaseCoincide
                     && dark.report.arms["base+mmr"]?.shown == 1,
                 "no photo anywhere: one story, as the Lead shows")
             let swapped = try leadArms(
-                stories: stories, currentShown: ["s03", "s02"], settings: LeadArmSettings(), currentSelectionMs: nil)
+                stories: stories, currentShown: ["s03", "s02"], settings: LeadArmSettings())
             check(!swapped.report.currentFollowsShippedOrder, "slides out of the shipped precedence are flagged")
             if let output = ProcessInfo.processInfo.environment["NEWS_RANKING_OUTPUT"] {
                 let encoder = JSONEncoder()
@@ -455,7 +456,7 @@ extension EditorialRankingEvaluation {
     /// depth and the MMR parameters.
     static func writeLeadArms(
         of candidates: [TodayStoryAssignment], currentLead: [TodayStoryAssignment], imageless: Set<String>,
-        profile: TodayUserProfile, pool: String, now: Date, database: DatabaseEngine, currentSelectionMs: Double,
+        profile: TodayUserProfile, pool: String, now: Date, database: DatabaseEngine,
         privateOutput: URL
     ) async throws {
         let env = ProcessInfo.processInfo.environment
@@ -484,8 +485,7 @@ extension EditorialRankingEvaluation {
         let arms: LeadArms
         do {
             arms = try leadArms(
-                stories: stories, currentShown: currentLead.map(\.id), settings: settings,
-                currentSelectionMs: currentSelectionMs)
+                stories: stories, currentShown: currentLead.map(\.id), settings: settings)
         } catch EditorialRankingError.inputLimit {
             throw NSError(
                 domain: "EditorialRankingEvaluation", code: 1,

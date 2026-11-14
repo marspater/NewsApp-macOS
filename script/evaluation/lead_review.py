@@ -41,7 +41,8 @@ from overview_review import (
 
 LABELS = ('lead', 'not')
 RANKINGS = ('publisherCount', 'briefing', 'z2')
-ARMS = ('current', 'base', 'base+mmr')
+MMR_ARM = 'base+mmr'
+ARMS = ('current', 'base', MMR_ARM)
 DEPTHS = (5, 10, 20)
 SOURCE = 'lead-rankings-private.json'
 SHEET = 'lead-review-private.csv'
@@ -118,10 +119,12 @@ def top(data, ranking, depth):
 
 
 def ndcg(data, ranking, labels, depth=10):
-    """NDCG of a ranking's top, `lead` as grade 1 and an unlabelled story as 0; the ideal list holds every story the
-    reader called `lead` on the sheet, whichever ranking put it there. None when the reader called none."""
-    gain = sum(1 / math.log2(row['ranks'][ranking] + 1) for row in data['stories']
-               if row['ranks'].get(ranking, depth + 1) <= depth and labels.get(row['id']) == 'lead')
+    """NDCG of a ranking's top, `lead` as grade 1 and `not` as 0. An unlabelled story is dropped from the ranking
+    before places are counted, as the protocol excludes unresolved items from scoring; the ideal list holds every
+    story the reader called `lead` on the sheet, whichever ranking put it there. None when the reader called none."""
+    judged = sorted((row['ranks'][ranking], row['id']) for row in data['stories']
+                    if ranking in row['ranks'] and labels.get(row['id']))[:depth]
+    gain = sum(1 / math.log2(place + 1) for place, (_, story) in enumerate(judged, 1) if labels[story] == 'lead')
     leads = sum(label == 'lead' for label in labels.values())
     return gain / sum(1 / math.log2(place + 1) for place in range(1, min(depth, leads) + 1)) if leads else None
 
@@ -251,11 +254,11 @@ def arm_fixture(directory):
     stories = [{'id': f's{index}', 'publisher': 'Publisher A', 'title': f'Headline {index}',
                 'summary': f'Private summary {index}',
                 'ranks': {arm: place for arm, place, depth in (('current', index, 4), ('base', 21 - index, 20),
-                                                              ('base+mmr', index - 2, 20)) if 1 <= place <= depth}}
+                                                              (MMR_ARM, index - 2, 20)) if 1 <= place <= depth}}
                for index in range(1, 23)]
     (directory / SOURCE).write_text(json.dumps(
         {'pool': 'page', 'nowTimestamp': 0, 'candidates': 150, 'depth': 20, 'shown': 5,
-         'lists': {'A': 'base', 'B': 'base+mmr', 'C': 'current'}, 'stories': stories}))
+         'lists': {'A': 'base', 'B': MMR_ARM, 'C': 'current'}, 'stories': stories}))
 
 
 def mark(directory, reader, slots):
@@ -342,7 +345,7 @@ def self_check():
         require([reader[arm]['at5']['count'] for arm in ARMS] == [3, 0, 1], 'Arm precision at 5')
         ideal = 1 + 1 / math.log2(3) + 0.5
         require(reader['current']['ndcgAt10'] == 1 and reader['base']['ndcgAt10'] == 0
-                and abs(reader['base+mmr']['ndcgAt10'] - 1 / ideal) < 1e-12, 'Arm NDCG@10')
+                and abs(reader[MMR_ARM]['ndcgAt10'] - 1 / ideal) < 1e-12, 'Arm NDCG@10')
         require(scored['days'][0]['top20Overlap'] == {'current/base': 4, 'current/base+mmr': 2, 'base/base+mmr': 18},
                 'Arm overlap')
         require(scored['days'][0]['redundantSlots'] == {} and scored['pooled']['base']['redundantSlots']['of'] == 0,
@@ -350,7 +353,7 @@ def self_check():
         mark(arms, 'a', {'A2', 'C3'})
         scored = report([arms])
         counted = {arm: (cell['count'], cell['of']) for arm, cell in scored['days'][0]['redundantSlots']['a'].items()}
-        require(counted == {'base': (1, 5), 'base+mmr': (0, 5), 'current': (1, 4)}, 'Redundant slots per arm')
+        require(counted == {'base': (1, 5), MMR_ARM: (0, 5), 'current': (1, 4)}, 'Redundant slots per arm')
         require(scored['pooled']['current']['redundantSlots'] == rate(1, 4), 'Pooled redundant slots')
         mark(arms, 'x', {'B1'})
         expect_rejected(lambda: report([arms]), ValueError, 'A first slot was marked redundant')
@@ -358,11 +361,13 @@ def self_check():
         empty = arms / 'empty'
         empty.mkdir()
         (empty / SOURCE).write_text(json.dumps({'pool': 'page', 'nowTimestamp': 2, 'candidates': 0, 'depth': 20,
-                                                'shown': 1, 'lists': {'A': 'current', 'B': 'base', 'C': 'base+mmr'},
+                                                'shown': 1, 'lists': {'A': 'current', 'B': 'base', 'C': MMR_ARM},
                                                 'stories': []}))
         require(sheet(empty) == 0 and report([empty])['days'][0]['rankings'] == list(ARMS), 'An empty arm key is one')
         fill(arms, 'b', set())
         require(report([arms])['days'][0]['perReader']['b']['current']['ndcgAt10'] is None, 'No lead, no NDCG')
+        unlabelled = {'stories': [{'id': 'x', 'ranks': {'r': 1}}, {'id': 'y', 'ranks': {'r': 2}}]}
+        require(ndcg(unlabelled, 'r', {'x': '', 'y': 'lead'}) == 1, 'An unlabelled story takes no place in NDCG')
     print('lead_review self-check passed')
 
 
