@@ -61,7 +61,9 @@ struct NotificationDelivery: Sendable {
     }
     /// Asks the existing image worker to prioritize a story; false means no lookup can start.
     var prioritizeImage: @Sendable (String) async -> Bool = { _ in false }
-    var withdrawImagePriority: @Sendable (String) async -> Void = { _ in }
+    var withdrawImagePriority: @Sendable (String) async -> Void = { _ in
+        // A delivery without an image worker has no queued priority to withdraw.
+    }
     /// Called after each banner posts, so the pass records it before the next.
     var record: @Sendable (PlannedBanner) async -> Void = { _ in
         // Without a library (tests, summary modes) there is nothing to record.

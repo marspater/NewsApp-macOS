@@ -1174,6 +1174,11 @@ class FeedManager: NSObject, ObservableObject {
         runningImageIDs = first
         let priority = imagePriority
         let runID = UUID()
+        let onImageSaved: @Sendable () -> Void = {
+            Task { @MainActor in
+                store.noteStoryImageSaved()
+            }
+        }
         imageLookupRunID = runID
         imageLookupTask = Task { [weak self] in
             await previous?.value
@@ -1182,12 +1187,8 @@ class FeedManager: NSObject, ObservableObject {
             defer { self?.logger.info("Story image lookup finished") }
             let work = Task.detached(priority: .utility) {
                 try await StoryCurator.run(
-                    in: database, imageFinder: finder, muting: muting, first: first, priority: priority
-                ) {
-                    Task { @MainActor in
-                        store.noteStoryImageSaved()
-                    }
-                }
+                    in: database, imageFinder: finder, muting: muting, first: first, priority: priority,
+                    onImageSaved: onImageSaved)
             }
             let result = await withTaskCancellationHandler {
                 await work.result
