@@ -755,7 +755,8 @@ enum DiagnosticsExport {
         return app
     }
 
-    /// "available", "unavailable (<reason>)", or a note that this build or system has no FoundationModels.
+    /// `available`, `unavailable` with the system's reason in parentheses, or `unavailable (needs macOS 26)` when
+    /// this build or system has no FoundationModels.
     static func foundationModelsAvailability() -> String {
         #if canImport(FoundationModels)
             if #available(macOS 26.0, *) {
