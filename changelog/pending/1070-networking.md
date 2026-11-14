@@ -1,0 +1,1 @@
+- Ports the networking atoms (NetworkingTests, GatewayTimingsTests, DNSAnswerCacheTests and NetworkTimelineTests: 24 tests, 206 assertions) to the native Swift Testing target under the `.networking` tag.
