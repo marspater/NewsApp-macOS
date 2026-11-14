@@ -1336,24 +1336,23 @@ struct ArticleDetailView: View {
             }
         }
         if readerModeBinding.wrappedValue == .story {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button(action: highlightSelection) {
-                    Label("Highlight", systemImage: "highlighter")
+            // One menu instead of three buttons, so the reader toolbar fits a 900-point window (#1328, DESIGN.md 5).
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button("Highlight Selection", action: highlightSelection)
+                    Button("Add Note to Selection…", action: beginNote)
+                    Divider()
+                    // Shortcuts live on the Edit menu's commands (ReaderAnnotations.swift); the help names them.
+                    Button(showsAnnotationsInspector ? "Hide Annotations" : "Show Annotations") {
+                        showsAnnotationsInspector.toggle()
+                    }
+                } label: {
+                    Label("Annotations", systemImage: "highlighter")
                 }
-                .help("Highlight the selected passage (⌘Y)")
-                Button(action: beginNote) {
-                    Label("Add Note", systemImage: "note.text.badge.plus")
-                }
-                .help("Add a private note to the selected passage (⇧⌘Y)")
+                .help("Highlight, add a note or show annotations (⌘Y, ⇧⌘Y, ⌥⌘I)")
                 .popover(item: $noteDraft) { draft in
                     NoteComposerView(quote: draft.quote) { await saveNote(draft, body: $0) }
                 }
-                Button {
-                    showsAnnotationsInspector.toggle()
-                } label: {
-                    Label("Annotations", systemImage: "sidebar.trailing")
-                }
-                .help("Show or hide highlights and notes (⌥⌘I)")
             }
         }
         ToolbarItemGroup(placement: .primaryAction) {
