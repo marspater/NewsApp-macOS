@@ -80,6 +80,9 @@ extension Tag {
     @Tag static var intelligence: Self
     @Tag static var lifecycle: Self
     @Tag static var socket: Self
+    @Tag static var briefing: Self
+    @Tag static var knowledgeExport: Self
+    @Tag static var analysisGeneration: Self
     /// Every suite the Integration test plan runs: a plan's tag list selects only tests carrying all of its tags.
     @Tag static var integration: Self
 }

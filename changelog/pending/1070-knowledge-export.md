@@ -1,0 +1,1 @@
+- Ports the two Knowledge export atoms (KnowledgeEPUBTests, KnowledgeExportTests: 2 tests, 37 assertions) to the native Swift Testing target under the `.knowledgeExport` tag.
