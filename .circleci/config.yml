@@ -1,30 +1,6 @@
 version: 2.1
 
 commands:
-  # Stops the macOS job of a main commit early, before any build:
-  # - when its push changed nothing the app, its tests or this pipeline read (script/ci_changes.sh, the rule GitHub
-  #   Actions uses too), measured from the commit main was at before the push, so every commit of the push counts;
-  # - when main has since moved on by a change that does need a run: that newer pipeline tests a tree holding this
-  #   commit. A newer change that needs no run leaves this one to test, so no commit is skipped by both rules.
-  # A stack merged in a minute is several pushes; this leaves one macOS run instead of one each.
-  halt-unless-app-changed:
-    steps:
-      - run:
-          name: "Skip a commit with nothing to test or a newer one to test it"
-          command: |
-            base="<< pipeline.git.base_revision >>"
-            if [ "$(script/ci_changes.sh "${base:-unknown}" HEAD '^\.circleci/')" = false ]; then
-              echo "Nothing the app, its tests or this pipeline read changed since $base; skipping."
-              circleci-agent step halt
-              exit 0
-            fi
-            # A failed fetch leaves the run to test, as before.
-            if git fetch -q origin main && [ "$(git rev-parse FETCH_HEAD)" != "$(git rev-parse HEAD)" ] \
-              && git merge-base --is-ancestor HEAD FETCH_HEAD \
-              && [ "$(script/ci_changes.sh HEAD FETCH_HEAD '^\.circleci/')" = true ]; then
-              echo "main moved on to $(git rev-parse --short FETCH_HEAD) with a change that its own pipeline tests; skipping."
-              circleci-agent step halt
-            fi
   prepare-macos:
     steps:
       - run:
@@ -58,7 +34,6 @@ jobs:
       xcode: "27.0"
     steps:
       - checkout
-      - halt-unless-app-changed
       - prepare-macos
       - run:
           name: "Run unit tests and regressions via Smarter Testing"
@@ -122,21 +97,32 @@ jobs:
           command: circleci run release update news-app --status=FAILED
           when: on_fail
 
+# The free plan's 30,000 credits a month buy about 144 minutes of the m4pro.medium macOS machine (208 credits a
+# minute). Running test-macos on every push to main still cost 72,393 credits on 12 and 13 November, so it runs only
+# in a scheduled pipeline (a weekly trigger on main, set in the project's Triggers settings) or one started by hand.
+# GitHub Actions gates every pull request and push; the commit hook runs the changed atoms on macOS 27 with Xcode 27.
 workflows:
+  # Every push: the Docker checks alone, a required check on main.
   build-and-test:
+    when:
+      and:
+        - not:
+            equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
+        - not:
+            equal: [ api, << pipeline.trigger_source >> ]
     jobs:
       - checks
-      # macOS credits: GitHub Actions runs the unit atoms, native tests, UI tests and package build on every pull
-      # request, so CircleCI's macOS job runs on main only. A pull request runs `checks` alone here.
+  # Scheduled or started by hand: the macOS suite on Xcode 27, then the release marker.
+  macos:
+    when:
+      or:
+        - equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
+        - equal: [ api, << pipeline.trigger_source >> ]
+    jobs:
+      - checks
       - test-macos:
           requires:
             - checks
-          filters:
-            branches:
-              only: main
       - deploy-marker:
           requires:
             - test-macos
-          filters:
-            branches:
-              only: main

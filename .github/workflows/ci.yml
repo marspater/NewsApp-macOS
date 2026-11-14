@@ -30,7 +30,7 @@ jobs:
   # `Changed paths` and both macOS jobs are required checks on main; the test job is the only macOS 26 runtime the
   # project has. So the workflow starts for every pull request and this job decides whether the macOS jobs have
   # anything to test. A skipped job satisfies a required check; a workflow that never starts leaves it waiting.
-  # script/ci_changes.sh is the rule, shared with CircleCI. If this job fails, the macOS jobs are skipped, and only
+  # script/ci_changes.sh is the rule. If this job fails, the macOS jobs are skipped, and only
   # its own failure blocks the merge.
   changes:
     name: Changed paths
@@ -73,7 +73,8 @@ jobs:
           fi
           echo "evaluation=$evaluation" >> "$GITHUB_OUTPUT"
 
-  # macOS 26 runtime coverage (#663): CircleCI and Codemagic already run this suite on macOS 27 with Xcode 27.
+  # macOS 26 runtime coverage (#663): CircleCI (weekly) and Codemagic (release tags) run this suite on macOS 27 with
+  # Xcode 27.
   # The runner has no Xcode 27, so code built only with the macOS 27 SDK is left out here.
   test-arm64:
     name: Test (macOS 26, Apple Silicon)
