@@ -1,0 +1,1 @@
+- Ports the lifecycle atom (LifecycleTests: 41 tests, 567 assertions) to the native Swift Testing target under the `.lifecycle` tag.
