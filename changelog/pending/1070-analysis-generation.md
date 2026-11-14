@@ -1,0 +1,1 @@
+- Ports the analysis generation atom (AnalysisGenerationTests: 12 tests, 91 assertions) to the native Swift Testing target under the `.analysisGeneration` tag.
