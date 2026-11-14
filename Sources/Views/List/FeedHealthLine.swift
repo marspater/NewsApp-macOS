@@ -16,6 +16,7 @@ import SwiftUI
 
 /// One line of operational feed health. Wording and color describe availability and content only, never trustworthiness.
 struct FeedHealthLine: View {
+    /// The feed's health record; nil reads as a feed with no record yet.
     let health: FeedHealth?
 
     var body: some View {

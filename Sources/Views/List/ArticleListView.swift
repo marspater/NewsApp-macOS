@@ -23,9 +23,11 @@ import SwiftUI
 /// again, and the main thread spins at a full core for as long as the window is key. Equality therefore reads
 /// what the commands read: which actions exist, never the closures themselves.
 struct ListCommandActions: Equatable {
+    /// Whether View › Group Stories by Event applies to the list in front.
     let canGroupStories: Bool
     /// The list in front, whose own layout View › as List and as Grid change.
     var layoutSection = "Today"
+    /// Starts a new Briefing edition (View › New Briefing); nil disables the command.
     let newBriefing: (() -> Void)?
     /// Leaves the Briefing for the destination shown before it (Navigate › Back).
     var back: (() -> Void)? = nil
@@ -34,6 +36,7 @@ struct ListCommandActions: Equatable {
     /// Presents the Customize Briefing sheet (View › Customize Briefing…).
     var customizeBriefing: (() -> Void)? = nil
 
+    /// Compares which actions exist and where Back leads, never the closures.
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.canGroupStories == rhs.canGroupStories && lhs.layoutSection == rhs.layoutSection
             && (lhs.newBriefing == nil) == (rhs.newBriefing == nil)
@@ -45,6 +48,7 @@ struct ListCommandActions: Equatable {
 private struct ListCommandActionsKey: FocusedValueKey { typealias Value = ListCommandActions }
 
 extension FocusedValues {
+    /// The actions of the story list in front, read by the app's menu commands; nil when no list is in front.
     var listActions: ListCommandActions? {
         get { self[ListCommandActionsKey.self] }
         set { self[ListCommandActionsKey.self] = newValue }
@@ -54,6 +58,8 @@ extension FocusedValues {
 /// Presentation-only choice: never sort, filter or change the feed's ordered entries.
 /// An event may borrow the image of one of its currently visible publications.
 enum LeadStoryPresentation {
+    /// The id of the first entry with a card image, which the Today and Briefing lists lead with; nil elsewhere and
+    /// while searching.
     static func firstEligibleID(in entries: [FeedEntry], selectedTopic: String?, isSearching: Bool) -> String? {
         let location = selectedTopic ?? "Today"
         guard !isSearching, location == "Today" || location == "Briefing" else { return nil }
@@ -64,14 +70,24 @@ enum LeadStoryPresentation {
 /// A transient masthead status line. Each notice is distinct, so a repeated message restarts its
 /// lifetime and announcement.
 struct MastheadNotice: Equatable {
+    /// The status line's text.
     let message: String
+    /// A fresh identity for every notice, so the same message shown again counts as new.
     let id = UUID()
 }
 
+/// The story list of the sidebar destination: the Today edition, the Briefing board, a topic, a smart binder, Saved
+/// Stories, History or search results, as a list or a grid under a masthead. It loads and buffers the stories, owns
+/// keyboard focus and Quick Look, and pushes the reader. Today shows the lane plan of Athena · editorial selection and
+/// Briefing its finite edition.
 struct ArticleListView: View {
+    /// The sidebar destination; nil is Today.
     @Binding var selectedTopic: String?
+    /// The search field's text; a non-empty search lists results instead of the destination.
     @Binding var searchText: String
+    /// The masthead's transient status line, which the list sets.
     @Binding var mastheadNotice: MastheadNotice?
+    /// The detail column's navigation path, onto which the list pushes the reader.
     @Binding var articlePath: NavigationPath
     /// Where the Briefing's Back returns: the destination shown before it, Today if none (#780).
     var previousTopic = "Today"
@@ -201,6 +217,7 @@ struct ArticleListView: View {
             "\(selectedTopic ?? "Today"):\(binderHash):\(searchText):\(themeManager.autoHideRead):\(muting.sourceParameter)|\(muting.topicParameter):\(showsMuted)"
     }
 
+    /// The stories the buffer shows, in list order.
     var filteredArticles: [FeedArticle] { buffer.displayed.articles }
 
     /// Saved Stories and History list exactly what the reader kept or opened. Briefing is always one card per event,
@@ -918,6 +935,7 @@ struct ArticleListView: View {
         return selectedTopic ?? "Today"
     }
 
+    /// The masthead's maximum width: the Briefing's width, the full width for a grid, the list width otherwise.
     static func headerMaxWidth(isBriefing: Bool, gridLayout: Bool) -> CGFloat? {
         if isBriefing {
             return AppLayout.briefingMaxWidth
@@ -1292,6 +1310,7 @@ struct ArticleListView: View {
         return false
     }
 
+    /// The scroll id of the masthead, the list's top.
     static var mastheadScrollID: String { "list-masthead" }
 
     /// The Today edition of the listed stories. Its lanes are assigned off the main actor; until the first
@@ -1762,6 +1781,7 @@ struct ArticleListView: View {
         }
     }
 
+    /// The focus direction of an arrow key; nil for any other key.
     static func todayDirection(_ key: KeyEquivalent) -> TodayFocusMap.Direction? {
         switch key {
         case .leftArrow: return .left
@@ -2057,7 +2077,9 @@ struct KeyboardShortcutsView: View {
 /// The Latest's column count and the card at each lane row's leading edge, where an arrow key enters a lane the
 /// reader has not focused. Not observed: nothing drawn depends on them.
 @MainActor final class TodayLayoutReport {
+    /// Cards per row in The Latest's grid.
     var latestColumns = 1
+    /// The card at each lane row's leading edge.
     var laneLeading: [TodayLane: String] = [:]
     /// The reader scrolled or paged a lane row sideways, or chose a Lead slide: the page is in use. A row's own
     /// layout reports are not that.
@@ -2073,6 +2095,8 @@ struct KeyboardShortcutsView: View {
     private var tasks: [TodayLane: Task<Void, Never>] = [:]
     private var started: [Task<Void, Never>] = []
 
+    /// Prefetches the card images of the next cards in the appearing card's lane, 18 ahead in The Latest and 6 in other
+    /// lanes, each lane's batch after its previous one; skipped in Low Power Mode, and The Lead is never prefetched.
     func cardAppeared(
         _ id: String, in edition: TodayEdition, using loader: @escaping @Sendable (URL, Int) async throws -> CGImage
     ) {
@@ -2097,6 +2121,7 @@ struct KeyboardShortcutsView: View {
         }
     }
 
+    /// Cancels every prefetch and forgets how far each lane has been prefetched.
     func reset() {
         furthest = [:]
         for task in started { task.cancel() }

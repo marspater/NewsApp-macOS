@@ -19,6 +19,7 @@ struct NotesHighlightsView: View {
     /// The sidebar's Library entry that shows this view.
     static let topic = "Notes & Highlights"
 
+    /// Opens the story of a chosen highlight or note, by article id.
     var onOpen: (String) -> Void
 
     @EnvironmentObject private var articleStore: ArticleStore
