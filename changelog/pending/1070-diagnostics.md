@@ -1,0 +1,1 @@
+- Ports the diagnostics atoms (DiagnosticsTests and ActiveWorkCancellationTests: 15 tests, 109 assertions) to the native Swift Testing target under the `.diagnostics` and `.cancellation` tags.
