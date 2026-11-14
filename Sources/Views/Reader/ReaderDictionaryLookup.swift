@@ -124,6 +124,7 @@ enum ReaderDictionaryLookup {
 
 /// System fonts that match the SwiftUI reader faces, so word hit-testing lays text out like the rendered block.
 extension ReaderDictionaryLookup {
+    /// The system font of the size, weight and design, made italic when asked.
     static func font(
         size: CGFloat, weight: NSFont.Weight = .regular, design: NSFontDescriptor.SystemDesign = .default,
         italic: Bool = false
@@ -137,12 +138,14 @@ extension ReaderDictionaryLookup {
         return italic ? NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) : font
     }
 
+    /// The body face of the reading style at the text scale: serif for Casper, the system face otherwise.
     static func bodyFont(for theme: ArticleThemeType, scale: CGFloat, italic: Bool = false) -> NSFont {
         font(
             size: AppTypography.bodySize(for: theme) * scale, design: theme == .casper ? .serif : .default,
             italic: italic)
     }
 
+    /// The lead paragraph's face of the reading style at the text scale.
     static func leadFont(for theme: ArticleThemeType, scale: CGFloat, italic: Bool = false) -> NSFont {
         switch theme {
         case .casper: return font(size: 20 * scale, design: .serif, italic: italic)
@@ -151,6 +154,7 @@ extension ReaderDictionaryLookup {
         }
     }
 
+    /// A heading's face of the reading style: bold for levels 1 and 2, semibold below.
     static func headingFont(level: Int, theme: ArticleThemeType, scale: CGFloat) -> NSFont {
         let design: NSFontDescriptor.SystemDesign =
             theme == .casper ? .serif : (theme == .alto ? .monospaced : .default)
@@ -159,10 +163,12 @@ extension ReaderDictionaryLookup {
             weight: level <= 2 ? .bold : .semibold, design: design)
     }
 
+    /// The code face: monospaced at 85% of the body size, rounded, then scaled.
     static func codeFont(for theme: ArticleThemeType, scale: CGFloat) -> NSFont {
         font(size: (AppTypography.bodySize(for: theme) * 0.85).rounded() * scale, design: .monospaced)
     }
 
+    /// The event overview's face for a text role at the text scale; only the title is serif.
     static func overviewFont(_ role: OverviewTextRole, scale: CGFloat) -> NSFont {
         let weight: NSFont.Weight
         switch role {
@@ -176,15 +182,20 @@ extension ReaderDictionaryLookup {
     }
 }
 
+/// Holds the force-click view behind a block, so the long press and the context menu look up in the same view.
 @MainActor
 final class LookUpBridgeCoordinator {
+    /// The block's force-click view; nil until it is made.
     weak var view: ForceClickMonitorView?
 }
 
 /// Attaches dictionary Look Up via force click, long press, context menu, and ⌃⌘D (Issue #1207).
 struct ReaderLookUpModifier: ViewModifier {
+    /// The block's text, in which the word is looked up.
     let text: String
+    /// The block's line spacing, for laying the text out as it is drawn.
     var lineSpacing: CGFloat = 0
+    /// The block's font, for laying the text out as it is drawn.
     var font: NSFont = NSFont.systemFont(ofSize: 14)
     @State private var coordinator = LookUpBridgeCoordinator()
 
@@ -222,10 +233,15 @@ struct ReaderLookUpModifier: ViewModifier {
     }
 }
 
+/// The invisible view behind a reader block that watches for a force click and gives the lookup a view to show in.
 struct ReaderForceClickBridge: NSViewRepresentable {
+    /// The block's text.
     let text: String
+    /// The block's line spacing.
     let lineSpacing: CGFloat
+    /// The block's font.
     let font: NSFont
+    /// Receives the view, for the modifier's other lookup paths.
     let coordinator: LookUpBridgeCoordinator
 
     func makeNSView(context _: Context) -> ForceClickMonitorView {
@@ -245,14 +261,19 @@ struct ReaderForceClickBridge: NSViewRepresentable {
     }
 }
 
+/// Looks up the word under a force click, once per press, without taking any clicks from the text above it.
 final class ForceClickMonitorView: NSView {
+    /// The block's text.
     var text: String = ""
+    /// The block's line spacing.
     var lineSpacing: CGFloat = 0
+    /// The block's font.
     var font: NSFont = NSFont.systemFont(ofSize: 14)
     nonisolated(unsafe) private var monitor: Any?
     /// One force click is one lookup: pressure keeps reporting stage 2 while the button stays down.
     private var forceClickLatched = false
 
+    /// Starts watching pressure events while the view is in a window and stops when it leaves.
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil && monitor == nil {
@@ -287,6 +308,7 @@ final class ForceClickMonitorView: NSView {
     /// The text system measures from the top-left, so points in this view must too.
     override var isFlipped: Bool { true }
 
+    /// Returns nil, so clicks, selections and links reach the SwiftUI text above.
     override func hitTest(_: NSPoint) -> NSView? {
         // Return nil so mouse clicks, selections, link activations pass straight through to SwiftUI Text
         nil

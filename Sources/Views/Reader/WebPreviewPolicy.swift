@@ -43,6 +43,8 @@ enum WebPreviewPolicy {
             : nil
     }
 
+    /// The content rules that block local, numeric and single-label hosts and non-web schemes, compiled once per launch
+    /// into a store private to this process; a failed compilation is tried again on the next call.
     static func contentRules() async throws -> WKContentRuleList {
         if let compiled { return try await compiled.value }
         let task = Task { @MainActor in

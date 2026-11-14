@@ -16,8 +16,11 @@ import AppKit
 import SwiftUI
 
 extension Notification.Name {
+    /// Posted by Edit › Highlight Selection.
     static let highlightSelectionCommand = Notification.Name("highlightSelectionCommand")
+    /// Posted by Edit › Add Note to Selection.
     static let addNoteCommand = Notification.Name("addNoteCommand")
+    /// Posted by View › Show or Hide Annotations.
     static let toggleAnnotationsCommand = Notification.Name("toggleAnnotationsCommand")
 }
 
@@ -53,8 +56,11 @@ struct AnnotationCommands: Commands {
 
 /// Routes the three annotation commands to the reader that shows a story.
 struct ReaderAnnotationCommands: ViewModifier {
+    /// Highlights the current selection.
     let onHighlight: () -> Void
+    /// Starts a note on the current selection.
     let onAddNote: () -> Void
+    /// Shows or hides the annotations inspector.
     let onToggleInspector: () -> Void
 
     /// Listens for the three commands on the reader.
@@ -97,8 +103,11 @@ enum ReaderSelection {
 
 /// Notes made from the reader's selection, waiting for the text of the note.
 struct NoteDraft: Identifiable {
+    /// A fresh identity for each draft, so the composer popover opens anew.
     let id = UUID()
+    /// One note per selected passage; the first carries the text of the note when it is saved.
     let notes: [UserNote]
+    /// The selected passages joined with an ellipsis, shown in the composer.
     var quote: String { notes.map(\.selectedText).joined(separator: " … ") }
 }
 
@@ -146,6 +155,7 @@ extension AttributedString {
 
 /// The popover that takes the text of a note on the passages the reader selected.
 struct NoteComposerView: View {
+    /// The selected passages the note is about.
     let quote: String
     /// Saves the note; the popover stays open, with the text, until this returns true.
     var onSave: (String) async -> Bool
