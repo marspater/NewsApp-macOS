@@ -97,7 +97,7 @@ Feature rules live beside this file. This file owns whatever applies to more tha
 - Icon-only items use an SF Symbol without a border, a `Label` with a text title (for VoiceOver and the overflow menu) and a `.help` tooltip naming the action and its shortcut. Keep text-labeled items in their own group.
 - The prominent style is reserved for the single most likely action, when a view has one; the list and reader have none.
 - When the window narrows, items move into the system overflow menu. Mark items that must stay visible with `visibilityPriority(.high)` (macOS 26.1+); never build a custom overflow menu.
-- The reader toolbar fits a 900-point window in every mode on every supported macOS, so Save never moves into the overflow menu: on macOS 27.0 an overflowing reader toolbar beside the annotations inspector made the window re-measure until AppKit aborted (#1328).
+- With search collapsed, the reader toolbar fits a 900-point window in every mode. Search expanded with a query (about 300 points) still pushes trailing items, Save among them, into the overflow menu. On macOS 27.0 that overflow, beside the annotations inspector attached inside the reader, made the window re-measure until AppKit aborted; the fix is tracked in #1328.
 - Every toolbar action also exists in the menu bar (section 15).
 - Prefer customizable toolbars (`toolbar(id:)`) for windows people keep open for long periods; system defaults stay sensible without customization.
 
